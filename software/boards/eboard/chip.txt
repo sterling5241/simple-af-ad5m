@@ -1,0 +1,197 @@
+AD5M - EBOARD MCU (toolhead board)
+========================================
+(See README.txt for the full index. See ../main/chip.txt for the
+mainboard MCU, ../ifs/chip.txt for the 4th, unidentified subsystem.)
+
+Identity: runs the genuine klipper3d/canboot bootloader
+------------------------------------------------------------
+Flashed via a tool called "IAPCommand" with a hex firmware file (Intel
+HEX format - "ADM_App.hex" is the real, original filename; Zmod
+renames it to "Eboard.hex" in its own bundle - same real filename
+lineage, but NOT byte-identical. Checked directly: the genuine stock
+factory ADM_App.hex (extracted/main-update/control-extracted/, from
+the real decrypted 1.1.1 control package) is 101,348 bytes, md5
+e8c7451e233867496d1d6f4af31bb747. The live printer's actual Eboard.hex
+(pulled via pscp, firmware-recon/Eboard.hex) is 106,892 bytes, md5
+9d004ff5b1c13728f94e25791d45a7b8 - different size, different checksum.
+Zmod ships its OWN BUILD of the eboard firmware, not merely a renamed
+copy of the stock one. (Same pattern confirmed for the mainboard too -
+see ../main/chip.txt.) This means Zmod's real footprint on this
+printer is bigger than just the app_startup.sh script edits documented
+in ../../factory-packages/factory-reset.txt - it also includes
+recompiled MCU firmware on both boards, directly relevant to this
+project's "genuine firmware-level replacement" goal.
+Decoded the Intel HEX locally and extracted strings - found literal
+" CanBoot!" and " Request Serial Bootloader!! ~" embedded in the
+binary. These are the real magic strings from klipper3d/canboot (also
+present in the bundled Klipper source as lib/canboot on this printer).
+The toolhead board runs the GENUINE open-source Klipper CanBoot
+bootloader, just in serial mode instead of USB/CAN - not a proprietary
+FlashForge format.
+
+Wiring: [mcu eboard] -> /dev/ttyS5, 230400 baud, real UART,
+restart_method: command. See ../../klipper/pins.txt for the full real
+GPIO pin mapping on this chip (extruder, heater, fan, accelerometer,
+X endstop, extra thermistors - the eboard hosts more peripherals than
+just the toolhead motor, including the mainboard's own X-axis endstop
+signal, since it's physically gantry-mounted).
+
+DEFINITIVE confirmation from Klipper's own live MCU handshake (pulled
+from the real printer.log):
+  Loaded MCU 'eboard' 116 commands (?-20241122_134741-ubuntu / gcc: 9.2.1 ...)
+  MCU 'eboard' config: ADC_MAX=4095 ... CLOCK_FREQ=144000000 MCU=stm32f103xe
+    PWM_MAX=255 ... SERIAL_BAUD=230400 STEPPER_BOTH_EDGE=1 ...
+Reports the exact same MCU=stm32f103xe/144MHz/BUS_PINS_* peripheral
+map as the mainboard (see ../main/chip.txt) - strongly suggests the
+toolhead chip is ALSO genuinely STM32F103xE-class silicon (either real
+ST or another pin-compatible clone, not necessarily Nations this time)
+- CanBoot's most common real-world target is exactly this chip class,
+which fits. Built close together with the mainboard firmware (Klipper
+build tags 2024-11-22 vs. 2024-11-25) using the same gcc 9.2.1 ARM
+toolchain.
+
+This answers the "from-scratch MCU port" question for both boards:
+both MCUs on this printer are firmware-identical in class to an
+extremely common, already first-class-supported Klipper MCU target -
+not exotic silicon needing new Klipper support written from scratch.
+
+Real tool: IAPCommand
+--------------------------
+Much sparser than NationsCommand - real syntax:
+  stm32isp [Options] <file> <comport> <baudrate>
+  Options: -verbose (for more information)
+Confirmed a hardcoded fallback default of /dev/ttyS5 baked into the
+binary itself (a literal string, matching this platform's real
+EBOARD_TTY) - even with zero arguments it still tries to open that
+real port.
+
+The REAL, only-ever-used stock invocation (confirmed from TWO
+independent real sources - Zmod's update_mcu.sh AND the genuine
+factory package's PROGRAM/control/1.1.1/run.sh, see
+../../factory-packages/main-update.txt):
+  IAPCommand <ADM_App.hex> /dev/ttyS5
+Exactly 2 positional args (file, port), NO baudrate ever passed -
+despite the --help syntax implying 3 args are required. Unlike
+NationsCommand, this tool has NO separate reset-only or connect-only
+safe mode at all - every real invocation always flashes a real file.
+
+SECOND INCIDENT, same day as the mainboard one: the user had given
+general permission to try identifying the eboard chip ("let's try the
+eboard, we need chips to make fw"). Under that general go-ahead, ran
+IAPCommand with ZERO arguments meaning to just check usage/help - that
+SPECIFIC action was not separately confirmed as safe first, unlike the
+mainboard incident's `-c`/`-c -r` attempts which were each explicitly
+asked about before running. It did NOT just print help - it actually
+opened /dev/ttyS5 (the real hardcoded default) and sent real STM32 ISP
+sync bytes twice, both timing out ("Can not connect to board,
+timed-out"). Klipper immediately lost the eboard afterward ("Lost
+communication with MCU 'eboard'", printer shutdown). Unlike the
+mainboard incident, plain klippy restarts (tried multiple times, with
+patience) did NOT recover it - required a second real physical power
+cycle, confirmed fixed via Moonraker /printer/info returning to
+"state":"ready". A full Linux-level `reboot` (as opposed to just
+klippy/Klipper-level restarts) was never tried on this board either,
+same caveat as the mainboard incident - not confirmed whether that
+alone would have been sufficient.
+
+LESSON: a general "go ahead and try X" does not cover every specific
+command along the way as pre-confirmed safe, especially against an
+unfamiliar vendor tool - "just checking usage" turned out not to be
+side-effect-free. Worth asking about the specific command, not just
+the general goal, before running anything against a live MCU port.
+
+Root cause, found on deeper inspection (shared with the mainboard
+incident - see ../main/chip.txt): full string-dumped IAPCommand (all
+342 strings) and found it statically links an IDENTICAL Gpio.cpp/
+gpio.c module to NationsCommand (`gpio_export`, `gpio_unexport`,
+`gpio_out`, `gpio_set_direction`, `gpio_set_value`, via
+`/sys/class/gpio`). Both tools control a real HOST-SIDE GPIO pin as
+part of their connect sequence - almost certainly each MCU's own
+physical hardware reset line. `stm32Reboot()`/`stm32Unexport()` are
+almost certainly the cleanup step that releases that GPIO and hands
+control back to the chip's real application firmware - a step this
+failed zero-arg run never reached, since it errored out mid-handshake
+before getting there.
+
+This is a complete, unified explanation for both incidents (this one
+and the mainboard's): a host-side Linux GPIO pin left asserted
+(holding the MCU in reset/ISP wait-state), completely outside
+Klipper/klippy's knowledge or control - only a real power cycle
+unconditionally clears it. Confirmed via /sys/class/gpio/ listing
+post-recovery: currently completely clean, nothing exported.
+
+The exact GPIO number remains unidentified - not statically
+discoverable anywhere (checked /proc/device-tree and dmesg pinctrl
+output, nothing found beyond generic driver init messages; chosen at
+runtime inside the compiled binary). Not pursued further given two
+real outages already from touching these tools live - would need
+either catching a live run (repeats the risk) or disassembling the
+binary, neither attempted.
+
+Chip identification by a SAFE method (2026-09-18, user-approved)
+-----------------------------------------------------------------------
+Correction to the earlier plan: IAPCommand has NO get-ID/get-UID
+function at all (checked its full symbol list) - every real
+invocation flashes a file, so it was never a usable way to identify
+the chip. Instead used Klipper's own stock scripts/dump_mcu.py, which
+speaks the normal Klipper serial protocol to the ALREADY-RUNNING
+application firmware and sends only read-only `debug_read` commands.
+No vendor tool, no reset GPIO, no bootloader entry - none of the
+mechanism behind the two outages. Procedure: stop klippy
+(klipperDaemon stop), run dump_mcu.py, restart via start.sh. Klippy
+came back cleanly afterward (both MCUs streaming, retransmit 0). The
+auto-mode classifier blocked the command until the user granted a
+specific permission for it via /permissions.
+
+Command run (Klipper stopped first, printer idle/heaters off):
+  python3 dump_mcu.py -b 230400 -s 0x1FFFF7C0 -l 0x40 /dev/ttyS5 out.bin
+Connected fine: "MCU type: stm32f103xe / Frequency: 144000000" (same
+handshake as before). Raw 64 bytes read from 0x1FFFF7C0:
+  1FFFF7C0: 36 01 11 6a 0c 50 45 47 57 36 34 30 30 01 6d 3f
+  1FFFF7D0: 62 06 61 06 9d f9 9e f9 ff ff ff ff ff ff ff ff
+  1FFFF7E0: 8f 3f cf 1f 70 c0 30 e0 00 01 ff fe 80 00 7f ff
+  1FFFF7F0: 36 01 11 50 45 47 57 36 34 01 6d 3f 11 45 54 8f
+Same read also confirms debug_read is supported by this eboard's
+firmware (116-command build).
+
+What this tells us:
+- NOT genuine ST silicon. On a real STM32F1, 0x1FFFF7E0 holds a 16-bit
+  flash-size value in KB (e.g. 0x0200) and 0x1FFFF7C0-7DF is blank
+  (0xFF). Here 0x1FFFF7E0 reads 0x3f8f (not a plausible KB count) and
+  0x7C0 holds data. So this is an STM32F1-compatible clone.
+- Layout matches the Nations vendor layout implied by the mainboard's
+  NationsCommand output (128-bit "UCID" at 0x1FFFF7C0 and a 96-bit
+  "UID" at 0x1FFFF7F0 - both blocks here share the same header
+  bytes "36 01 11" ... "PEGW64" ... "01 6d 3f", i.e. the same
+  lot/wafer code repeated). I am fairly, not fully, sure of the
+  Nations address layout - it is consistent with, not proof of.
+- Embedded ASCII code "PEGW6400" in the eboard's UCID, versus
+  "PAPG5300"-style text decoded from the MAINBOARD's UCID earlier
+  (see ../main/chip.txt). Same format (P + 3 letters + 4 digits), so
+  the same vendor/scheme is very likely. But the letters and digits
+  DIFFER (PEGW/6400 vs PAPG/5300) - these could be just different lot
+  codes or could encode different part variants; not determined.
+FOLLOW-UP: the same read on the MAINBOARD (see ../main/chip.txt) matched
+NationsCommand's own UCID/UID output byte-for-byte, so the Nations
+layout (UCID @0x1FFFF7C0, UID @0x1FFFF7F0) is now CONFIRMED against a
+known-Nations chip, and the eboard's dump has the identical structure.
+Side-by-side, 0x1FFFF7E0-7EF (mainboard vs eboard):
+  main:   8f ff cf 3f 70 00 30 c0 | 00 02 ff fd | 80 00 7f ff
+  eboard: 8f 3f cf 1f 70 c0 30 e0 | 00 01 ff fe | 80 00 7f ff
+Observation: these are value+complement pairs (8f/70, cf/30, ff/00,
+3f/c0, 1f/e0; 0002/fffd, 0001/fffe - each byte's complement sits
+4 bytes later, a built-in integrity check). The DIFFERING values are
+main 0x0002 vs eboard 0x0001 (possibly a flash-size class code, e.g.
+in 256KB units - so eboard smaller than mainboard) and byte masks ff/3f
+vs 3f/1f (possibly package pin/GPIO availability - consistent with the
+mainboard using PA-PD pins while the eboard only uses PA/PB).
+Consistent with the eboard being a smaller/lower-spec member of the
+same Nations N32G45x family, but that decode is HYPOTHESIS only - not
+checked against a Nations datasheet.
+CONCLUSION: eboard is very probably a Nations N32G45x-family chip like
+the mainboard - upgraded from "circumstantial guess" to "fairly
+strong evidence". Still NOT resolved: the exact part (N32G452 vs
+N32G455 etc.) - it would need further reads (flash-size/device-ID
+registers, e.g. DBGMCU_IDCODE at 0xE0042000 - an unmapped read on a
+Cortex-M can fault the MCU and trigger a watchdog reset, so it needs
+separate approval) or physical chip markings.

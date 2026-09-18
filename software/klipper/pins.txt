@@ -1,0 +1,79 @@
+AD5M - FULL REAL GPIO/PIN MAPPING
+======================================
+(See README.txt for the full index. See ../boards/main/chip.txt and
+../boards/eboard/chip.txt for the two MCUs these pins live on.)
+
+Pulled in full from the live printer.base.cfg + printer.cfg, and
+independently cross-checked against a genuine pristine factory copy
+(see ../factory-packages/factory-reset.txt) - nearly identical, only
+minor tuning-value drift, confirming this mapping is accurate and
+real, not self-consistent-but-wrong.
+
+Kinematics: corexy. Two MCUs in the config: unprefixed = mainboard
+(N32G45x), "eboard:" prefix = toolhead board (CanBoot bootloader chip).
+
+Mainboard (N32G45x) pins
+------------------------------
+  stepper_x: step PB13, dir PB12, enable !PB1, endstop !eboard:PA15 (X
+             endstop physically lives on the TOOLHEAD board - makes
+             sense for corexy, X endstop is gantry-mounted)
+  stepper_y: step PC4, dir PA7, enable !PA2, endstop !PC12
+  stepper_z: step PC7, dir PC8, enable !PB14, endstop PD2 (not inverted)
+  tmc2209 UART: stepper_x PB11, stepper_y PB0, stepper_z PB15
+  heater_bed: heater_pin PB9, sensor_pin PA0 (Generic 3950 thermistor),
+              PID already tuned (Kp 32.79 / Ki 4.970 / Kd 54.118)
+  probe: pin !PB3, z_offset -0.25, samples 3 - see ../klipper/load-cell.txt,
+         it's a plain digital pin, NOT a load cell (that was an earlier
+         wrong assumption, fully corrected there).
+  chamber_led: white_pin PA11, hardware_pwm False
+  controller_fan driver_fan: pin PA5, watches stepper_x/y/z
+  lis2dw accelerometer: actually wired to EBOARD (cs eboard:PA4, sw-spi
+         sclk eboard:PA5, mosi eboard:PA7, miso eboard:PA6) - so the
+         accelerometer lives on the toolhead board, not the mainboard.
+
+Eboard (toolhead, CanBoot bootloader chip) pins
+-----------------------------------------------------
+  extruder: step eboard:PB14, dir !eboard:PB15, enable !eboard:PB12,
+            gear_ratio 50:10, rotation_distance 21.9 (geared extruder)
+            heater_pin eboard:PA8, sensor_pin eboard:PA0 (Generic 3950)
+            tmc2209 UART eboard:PB10, run_current 0.8
+  heater_fan heat_fan: eboard:PB4 (hotend cooling, tied to extruder heat)
+  fan_generic fanM106: eboard:PB5 (part cooling fan, driven by M106/M107
+            gcode macros, not Klipper's stock [fan])
+  output_pin _extruder_heater: eboard:PB7 - see the dedicated section
+            below, fully investigated.
+  temperature_sensor head: eboard:PA1 (extra thermistor, Generic 3950)
+  temperature_sensor filamentValue: eboard:PA3 (Generic 3950 - AD5M has
+            a filament runout/cutting mechanism per FlashForge marketing,
+            this and "cutValue" below are likely part of that - possibly
+            related to the still-unidentified IFS subsystem, see
+            ../boards/ifs/chip.txt, not confirmed)
+  temperature_sensor cutValue: eboard:PA2 (Generic 3950)
+
+Notably absent from mainboard/eboard split above: no [mcu bed] - the bed
+heater lives directly on the mainboard MCU (PB9/PA0), unlike Creality
+K1's 3-MCU split (mcu/nozzle-mcu/bed-mcu each separate boards) - AD5M is
+a simpler 2-MCU design for motion/heating (main + toolhead only - see
+../boards/ifs/chip.txt for a possible 3rd, non-motion subsystem).
+
+output_pin _extruder_heater (eboard:PB7) - fully investigated
+--------------------------------------------------------------------
+Searched the ENTIRE config/macro tree (all translate/en/*.cfg files)
+and all of both klipper source trees (/usr/prog/klipper/klippy,
+/usr/data/zmod/klipper/klippy) for any other reference to
+"_extruder_heater" - found NONE. It is defined once
+(base_klipper13.cfg: pin eboard:PB7, value:1, shutdown_value:0) and
+never touched by any macro, gcode_macro, or klippy extra anywhere -
+no SET_PIN ever targets it. The leading underscore is Klipper's own
+convention for hiding an object from status/UI reporting.
+
+Given: (a) always-on by default, (b) forced off specifically on a
+Klipper shutdown/estop, (c) never dynamically toggled by any software
+logic anywhere in the whole stack - this is consistent with a static
+hardware safety-enable line (e.g. gating real power to the heater
+cartridge circuit, independent of and in series with the actual PWM
+heater_pin) rather than anything Klipper actively drives during normal
+operation. Its exact physical destination on the eboard can't be
+confirmed further without hardware/schematic access, but its complete
+*software* behavior is now fully characterized - nothing left to find
+via SSH on this one.

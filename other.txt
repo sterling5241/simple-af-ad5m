@@ -1,0 +1,85 @@
+AD5M - OTHER (GOAL / ACCESS / REPO CONTEXT / GROUND RULES)
+=============================================================
+(See README.txt for the full index/map of this project. See plan.txt
+for open items / next steps.)
+
+Goal
+----
+Add real FlashForge AD5M (Adventurer 5M) support to the Creality-only
+upstream projects:
+  - pellcorp/creality   (printer provisioning/installer toolkit)
+  - pellcorp/kalico     (Klipper/Kalico fork, klippy host + MCU C source)
+  - Guilouz/Creality-Helper-Script (menu-driven feature installer)
+
+Not a personal mod - the target is upstreaming, so anything built needs
+to match these repos' real conventions and get maintainer buy-in.
+
+Checked 2026-09-18 via GitHub search API: zero mentions of AD5M/FlashForge
+in any of the three repos' issues or PRs. Greenfield - nothing to avoid
+duplicating, nothing previously rejected to work around.
+
+Test printer / access
+------------------------
+FlashForge AD5M at 192.168.0.161, SSH root:root (Zmod default, port 22).
+Currently running Zmod (ghzserg/zmod) on top of stock firmware - not
+stock alone, not xblax's klipper_mod.
+SSH command used throughout this research (plink, since Windows OpenSSH
+client failed pubkey-only and needed password auth):
+  plink -ssh -pw root -hostkey "SHA256:M+sD/bTOeDc6vjnBX7z3UUOitHFZwHgIwiz6tvJkdWw" root@192.168.0.161 '<commands>'
+File pull (printer has no sftp-server, use legacy scp protocol):
+  pscp -scp -pw root -hostkey "SHA256:...same..." root@192.168.0.161:<remote path> <local path>
+
+Prior art (not upstream, but proven low-level solutions)
+------------------------------------------------------------
+xblax/flashforge_ad5m_klipper_mod - separate community project, already
+solved: root access, a chroot-based boot override, dual-boot back to
+stock, MCU firmware flashing for this exact printer. SSH root:klipper
+after install. Worth reviewing as reference for the provisioning
+mechanism, not as something to copy wholesale.
+
+pellcorp/kalico and pellcorp/k1-kalico-firmware repo structure (checked
+on GitHub directly, not from memory, 2026-09-18)
+----------------------------------------------------------------------------
+pellcorp/kalico's own board_configs/ directory contains exactly ONE file
+(bondtech_indx_usb.config, a toolboard preset) - it is NOT a
+per-printer-model directory. An earlier doc-summary fetch hallucinated
+things like ".config.btteddy"/".config.creality-42x" living there -
+that was wrong, disregard it.
+
+The real per-printer-model Kconfig presets live in the separate
+pellcorp/k1-kalico-firmware repo (the dedicated firmware BUILD repo),
+at its root as dotfiles:
+  .config.mcu / .config.noz / .config.bed        (K1 generic)
+  .config.e3v3-mcu / -noz / -bed                 (Ender 3 V3)
+  .config.e5m-mcu / -noz                         (Ender 5 Max)
+  .config.ke-mcu                                 (Ender 3 V3 KE)
+  .config.cr10se-mcu / -noz                      (CR-10 SE)
+Checked .config.e3v3-mcu's actual content: it targets
+CONFIG_MACH_GD32=y, CONFIG_MCU="gd32f303xe" (GigaDevice, a DIFFERENT
+clone vendor than Nations). So Creality's whole existing K1/Ender3V3
+family runs GD32F303, not N32G45x - there is no existing .config.ad5m-*
+preset to copy, but the underlying kalico Kconfig plumbing for AD5M's
+actual chip already exists (see software/boards/main/chip.txt) and would just need its
+own new preset file in this repo, following the same naming convention
+(.config.ad5m-mcu, presumably no separate -noz/-bed needed since eboard
+is the only sub-MCU here, unlike K1's nozzle/bed split).
+This repo's own board_configs/ subdirectory (separate from kalico's)
+also currently has exactly one file (bondtech_indx_usb.config) -
+confirms the same thing, not a per-model directory either.
+
+Ground rules for this project
+------------------------------
+- Read-only commands against the live printer: pre-authorized, no need
+  to ask each time. Anything that WRITES/CHANGES printer state
+  (flashing, config edits, service restarts, reboots): ask first, every
+  time.
+- The actual goal is a genuine firmware-level replacement/swap, NOT a
+  chroot/bind-mount overlay like Zmod runs on top of stock.
+- Don't volunteer "here's how the bigger project should proceed"
+  conclusions while doing narrow recon - report facts, let direction be
+  asked for explicitly.
+- Upstreaming target repos are Creality-only today - getting AD5M in
+  will need real engineering plus maintainer buy-in, not just a PR.
+- Use real upstream repo source directly when working in it, never
+  reimplement/paraphrase from memory. Match each repo's own file/comment
+  conventions.

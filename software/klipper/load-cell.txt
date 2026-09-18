@@ -1,0 +1,72 @@
+AD5M - Z-PROBE vs. LOAD CELL vs. WEIGHT TELEMETRY (3 separate things)
+============================================================================
+(See README.txt for the full index. See pins.txt for the [probe] pin
+this refers to.)
+
+This printer has THREE independent, unrelated subsystems that earlier
+notes (before reading the actual extras in full) had wrongly conflated
+into one "load cell probe" story. Fully resolved by reading all four
+candidate klippy extras end to end.
+
+1. THE ACTUAL Z-PROBE
+--------------------------
+[probe] pin: !PB3 in printer.cfg is exactly what it looks like: a
+plain digital endstop-style trigger pin on the mainboard MCU. No
+load-cell class, no ContinuousTareFilter, nothing fancy - confirmed by
+grepping the real active printer.cfg/printer.base.cfg for "load_cell":
+zero matches. This printer's current firmware does NOT use a
+load-cell-based probe for G28/bed_mesh at all.
+
+2. A SEPARATE "WEIGHT" TELEMETRY SENSOR (print-time safety monitor)
+------------------------------------------------------------------------
+[temperature_sensor weightValue] / sensor_type: temperature_load is
+backed by the ACTIVE extra /usr/prog/klipper/klippy/extras/zmod_tenz.py
+(a real file, symlinked from /usr/data/zmod/zmod/.shell/zmod_tenz.py).
+This talks to a THIRD, separate serial UART - /dev/ttyS7, 9600 baud -
+completely independent from [mcu] (ttyS2) and [mcu eboard] (ttyS5).
+Simple ASCII command protocol: sends "H1"/"H2 Sxxx"/"H3 Sxxx"/"H7",
+gets back plain text responses like "<value> g". H1 = tare/zero
+(confirmed by cmd_LOAD_CELL_TARE calling cmd_H1 with a Russian
+comment "calling command H1 to reset weight"). H7 = continuous weight
+poll, pushed into Klipper as the "temperature_load" sensor's reading.
+
+This extra ALSO registers ZCONTROL_ON/OFF/PAUSE/ABORT/AUTO/Z/STATUS
+gcode commands - a real, working safety feature: if the streamed
+weight exceeds a configured threshold above a set Z height during a
+print, it triggers a PAUSE or full klippy shutdown ("Nozzle hit bed or
+part detachment"). This is a print-time safety monitor, unrelated to
+bed-mesh probing.
+
+3. STAGED BUT NOT ACTIVE ON THIS PRINTER: a proper Kalico-style
+load-cell-probe implementation
+------------------------------------------------------------------------
+Three more sophisticated extras exist under
+/usr/data/zmod/klipper/klippy/extras/ (Zmod's own bundled source tree,
+NOT the /usr/prog/klipper tree that's actually running - confirmed
+these three are absent from /usr/prog/klipper's own extras dir, only
+zmod_tenz.py is symlinked/active there):
+
+  - flashforge_loadcell.py (Jul 2026) - talks to the load cell via
+    PROPER Klipper MCU protocol commands (flashforge_loadcell_h1/h2/
+    h3/h7, registered via mcu.register_serial_response) instead of
+    zmod_tenz's raw pyserial approach - requires the MCU's compiled
+    firmware to actually support these custom command names
+    (`_handle_connect` raises an error if the MCU doesn't have them -
+    this printer's currently-flashed MCU firmware does not).
+
+  - load_cell.py (Jul 2026) and load_cell_probe.py (Sep 2026, the
+    newest of the three) - class names (ContinuousTareFilter/
+    ContinuousTareFilterHelper, LoadCellProbeConfigHelper, TapAnalysis,
+    LoadCellProbingMove, TappingMove, LoadCellPrinterProbe,
+    LoadCellCommandHelper, LoadCellGuidedCalibrationHelper) closely
+    match the real, genuine upstream Kalico/Klipper load_cell extras'
+    own architecture and naming - this looks like a proper Kalico-style
+    load-cell-probe port, not a from-scratch reimplementation, but it
+    is NOT wired up or active in this printer's real current config.
+
+Net effect: a real load-cell-as-probe system (matching genuine Kalico
+architecture) exists in Zmod's own source tree for this printer
+family, staged for a future MCU firmware + config update, but this
+specific unit is currently still running the plain digital-pin probe
+(#1) + separate serial telemetry-only safety monitor (#2) described
+above.

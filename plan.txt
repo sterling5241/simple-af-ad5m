@@ -1,0 +1,200 @@
+AD5M - OPEN ITEMS / NEXT STEPS
+=================================
+Checklist of what's still unresolved or undecided, pulled from
+everything under software/ plus other.txt. See README.txt for the full
+map. Not a prescribed sequence - pick from these based on direction
+given.
+
+Checkbox legend (was inconsistent before a documentation review caught
+it - this is the stated convention now):
+  [x] = fully resolved, nothing more to find on this question
+  [~] = answered as far as SSH/local-file access can go, but a real
+        residual question remains that needs something else (physical
+        hardware access, binary reverse engineering, or a live action
+        judged too risky to repeat) - not being pursued further right
+        now, but not the same as "done"
+  [ ] = genuinely open, more progress is plausible without new access
+
+Firmware/hardware layer (see software/boot/ and software/boards/)
+----------------------------------------------------------------------
+[~] Exact N32G45x variant - N32G452 vs N32G455. Ran the real "get chip
+    info" query with explicit permission (`NationsCommand -c -r`, safe -
+    connect+reset, no flash write). Got real hardware data back: BOOT
+    Command Version V:22, BOOT SubVersion V25, a real UCID and UID. Not
+    a plain "N32G452"/"N32G455" string, but the closest this tool gives.
+    First attempt (bare `-c`, no `-r`) knocked the printer offline until
+    a physical power cycle - recovered, printer healthy, full incident
+    + working recovery pattern logged in software/boards/main/chip.txt.
+    Not pursuing further (would mean decoding/cross-referencing the
+    UCID further).
+[~] UPDATE 2 (latest): the same dump_mcu.py read was run on the
+    MAINBOARD (/dev/ttyS2) and matches NationsCommand's UCID/UID
+    byte-for-byte - the Nations layout (UCID @0x1FFFF7C0, UID
+    @0x1FFFF7F0) is now confirmed against a known-Nations chip, and the
+    eboard dump has the identical structure. The 0x1FFFF7E0 block differs
+    between the boards (main 0x0002 vs eboard 0x0001 in a complement-
+    checked field) - hint of a different/smaller variant on the eboard,
+    hypothesis only. Exact N32G452/N32G455 for either board still not
+    determined; the only remaining register read is DBGMCU_IDCODE at
+    0xE0042000 (can fault the MCU -> watchdog reset; NOT run, needs its
+    own explicit approval). See software/boards/main/chip.txt and
+    software/boards/eboard/chip.txt.
+[~] UPDATE (later, supersedes the wording below): eboard chip
+    identified as very probably a Nations N32G45x-family clone via a
+    SAFE method - Klipper's stock dump_mcu.py (read-only debug_read),
+    NOT IAPCommand (which has no get-ID mode at all). Read the UCID/UID
+    area at 0x1FFFF7C0: non-ST layout, embedded lot code "PEGW6400"
+    matching the mainboard's format. Exact variant (N32G452 vs N32G455)
+    still unresolved; needs further debug_read of ID/flash-size
+    registers (separate approval - unmapped read can fault the MCU) or
+    physical chip markings. See software/boards/eboard/chip.txt.
+    ORIGINAL ENTRY: Eboard (toolhead) chip's exact part number - tried, caused a SECOND
+    real outage (IAPCommand, run to check usage, actually opened the
+    real eboard serial port and interrupted it - unlike NationsCommand,
+    this tool has no safe reset-only flag at all). Recovered via a
+    second physical power cycle. Root cause for BOTH incidents found on
+    deeper inspection: both tools control a real host-side GPIO (the
+    MCU's hardware reset line) via /sys/class/gpio, and a failed run
+    leaves it asserted - invisible to Klipper, fixable only by a real
+    power cycle. Exact GPIO number and exact chip part number remain
+    unknown - not statically discoverable, and not pursuing further
+    live attempts given two outages already. See
+    software/boards/eboard/chip.txt.
+[~] Bootloader/SPL location - confirmed NOT visible from the running
+    Linux OS (no mtd, no boot0/boot1 content, no driver). Would need
+    physical inspection (board photos/chip markings) or a hardware
+    programmer to go further. GENUINELY BLOCKED on physical access, not
+    pursuable via SSH at all. See software/boot/bootloader-spl.txt.
+[~] What actually triggers a reboot after local_ota_update.sh completes -
+    confirmed it's NOT in any of the real GUI app's shell scripts
+    (searched all of /usr/prog/PROGRAM/software/*.sh) - the trigger call
+    is compiled directly into the closed-source firmwareExe Qt binary.
+    Would need binary reverse engineering to pin down further; not
+    pursued as low-value (this is just GUI glue around the already-
+    fully-documented real update mechanism, not part of it). See
+    software/boot/ota-system.txt.
+[x] usr/prog/etc/ota_bin/network_main_os_update_recovery.sh and
+    network_recovery_update_main_os.sh - read in full. Resolved: a
+    genuine second use of the same A/B slots to deploy/restore a
+    separate "recovery" (rescue) OS image, tracked by its own
+    independent version counter. See software/boot/ota-system.txt.
+[~] The unexplained 137MB firmwareExe.core crash dump + rotated
+    firmwareExe.log.N files noticed early on (see
+    software/klipper/moonraker.txt) - flagged in passing but never
+    actually tracked here. FlashForge's own native app crashed at some
+    point; cause unknown, tangential to this project's actual goal, not
+    investigated.
+
+Add-ons/Klipper layer (see software/klipper/)
+--------------------------------------------------
+[x] Load-cell klippy extras read in full - resolved: the real Z-probe
+    is a plain digital pin, unrelated to a separate serial "weight"
+    telemetry sensor used only for print-time crash detection. A more
+    sophisticated Kalico-style load-cell-probe implementation exists in
+    Zmod's source but isn't active on this printer. See
+    software/klipper/load-cell.txt.
+[~] output_pin _extruder_heater (eboard:PB7) - searched the entire
+    config/macro tree and both klipper source trees, no other
+    reference exists anywhere. Software behavior is fully characterized
+    (static, always-on, forced off on shutdown, never dynamically
+    toggled) - consistent with a hardware safety-enable line. Exact
+    physical destination needs schematic/hardware access, not further
+    reachable via SSH. See software/klipper/pins.txt.
+
+Real factory packages (user-provided, see software/factory-packages/)
+---------------------------------------------------------------------------
+[x] Obtained real official FlashForge packages: AD5X-factory-1.0.9.tgz
+    (the real installer script + status screens), AD5X-factory.tar.xz
+    (139MB, extracted in full - a genuine pristine snapshot of
+    /usr/prog + /usr/data), and AD5X-3.1.0-1.1.1-3.0.7-20260515.tgz
+    (the full OS+control update package - encrypted, OpenSSL
+    "Salted__" header). Extracted and cross-checked the two
+    unencrypted ones in full against everything already documented -
+    confirmed accurate (pristine app_startup.sh matches the exact
+    Zmod diff already reverse-engineered; pristine printer.cfg matches
+    the live pin mapping; real production run.sh confirms the exact
+    NationsCommand/IAPCommand invocations already documented).
+[x] Decrypt AD5X-3.1.0-1.1.1-3.0.7-20260515.tgz - DONE. Key was
+    hardcoded in plaintext inside /usr/prog/mytar: DES3, key
+    `FFP0302~%@ffroot800`, OpenSSL Salted__ format. Decrypted locally
+    with `openssl enc -des3 -d -k 'FFP0302~%@ffroot800' -md md5 -salt`
+    (modern OpenSSL needs -md md5 explicit, old 1.0.2d didn't). Full
+    real OS update package now extracted locally: real kernel+rootfs
+    images, real control firmware, and the master flashforge_init.sh
+    orchestrator tying everything together. NOTE: this specific real
+    package does NOT contain an other/ directory, so the
+    update_other()/klippy.tar Klipper-update path documented in
+    software/factory-packages/main-update.txt is confirmed as CODE the
+    script is capable of running, not something actually observed
+    happening in this real package - see that file for the corrected
+    wording.
+[x] Confirmed a real, previously-undocumented fact: Zmod's MCU firmware
+    on BOTH boards is NOT byte-identical to the genuine stock factory
+    firmware (different checksums/sizes for both Mainboard.bin/AD5X.bin
+    and Eboard.hex/ADM_App.hex). Zmod ships its own rebuilt MCU
+    firmware, not just host-side script edits. See
+    software/boards/main/chip.txt and software/boards/eboard/chip.txt.
+[x] library-2.0.1.tar.xz and software-3.1.0.tar.xz - extracted and
+    examined. library is simple (just ships nim.tar). software turned
+    up a real, important correction: its app_startup.sh has 2 extra
+    lines beyond the "pristine" factory-reset.txt reference copy,
+    which are FlashForge's OWN real version-to-version evolution, not
+    Zmod's - see software/factory-packages/main-update.txt. Also
+    confirmed a real, second Klipper-update mechanism (specific .py
+    files patched directly into klippy/extras and klippy/kinematics),
+    distinct from the theorized-but-unobserved klippy.tar bucket.
+[x] The previously-unknown 4th subsystem, "IFS" on /dev/ttyS4 - FULLY
+    RESOLVED via safe offline binary analysis plus read-only live
+    inspection (zero hardware risk, no live serial query ever
+    attempted). It's a real 4-channel filament feed/switch system -
+    FlashForge's equivalent of an AMS-style multi-material unit -
+    confirmed via self-documenting protocol strings decoded from the
+    real ifs.hex firmware ("four color. version: 3.0.7", per-channel
+    feed/release commands, real TMC stepper-driver register names),
+    AND via a real, complete ~1430-line Klipper extra
+    (zmod_ifs.py) implementing the full protocol, gcode command set,
+    and config file locations. Confirmed via live read-only checks:
+    this specific printer's active printer.cfg does NOT instantiate
+    [zmod_ifs] (consistent with being a plain single-color AD5M), but
+    FlashForge's native firmwareExe app has /dev/ttyS4 open live
+    regardless, independent of Klipper. Also found IFSCommand is
+    source-identical to IAPCommand (same real outage risk, never
+    touched live) and corrected an earlier wrong assumption about
+    ifsF37 (it's an interactive debug terminal, not a bootloader-entry
+    prep step). See software/boards/ifs/chip.txt.
+[x] The companion `zmod_color` klippy extra - read/grepped. RESOLVED:
+    `get_display()` just returns a plain config option
+    (`config.getboolean('display', True)`, default True) - IFS
+    integration is inert by default unless a printer's config
+    explicitly sets `display: False`. Moot for this printer since
+    neither extra is in its active config. See
+    software/boards/ifs/chip.txt.
+[x] firmware-recon/Eboard.bin and firmware-recon/c_helper.so -
+    resolved. Eboard.bin is confirmed byte-identical to Eboard.hex
+    decoded from Intel HEX (this project's own earlier intermediate
+    file, nothing separate). c_helper.so is confirmed as Klipper's own
+    compiled chelper library (real stepcompress/itersolve/trapq
+    symbols), not MCU firmware.
+
+Decisions not yet made (need direction, not just more recon)
+--------------------------------------------------------------------
+[ ] Real, unresolved tension in other.txt: its "Goal" section describes
+    the target as upstreaming into pellcorp/creality (described in that
+    same section as a "provisioning/installer toolkit") and
+    Guilouz/Creality-Helper-Script (a "menu-driven feature installer"),
+    but its own "Ground rules" section states the actual goal is "a
+    genuine firmware-level replacement/swap, NOT a chroot/bind-mount
+    overlay like Zmod." An installer/provisioning toolkit and a
+    ground-up firmware replacement are different strategies, and
+    nothing in other.txt reconciles which one is actually being aimed
+    at. This needs your call - it's not just a wording fix, it may
+    change what "done" looks like for this whole project.
+[ ] What a "genuine firmware-level swap" concretely means as a target
+    for this project, now that the real mechanism is fully documented
+    (software/boot/ota-system.txt has the complete real A/B OTA
+    toolkit: manifest format, write primitive, slot-switch logic, no
+    signing). Options exist but haven't been chosen between - this
+    needs your call, not an assumed default.
+[ ] Whether to keep researching read-only, or move to any hands-on step
+    (which would need explicit go-ahead per the ground rules in
+    other.txt, since anything beyond read-only requires asking first).

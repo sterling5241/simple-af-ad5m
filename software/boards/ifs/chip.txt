@@ -1,0 +1,164 @@
+AD5M - IFS/FFS SUBSYSTEM (4th board) - RESOLVED, no live risk taken
+==========================================================================
+(See README.txt for the full index. See ../main/chip.txt and
+../eboard/chip.txt for the other two boards. See ../../klipper/load-
+cell.txt for zmod_tenz.py, the closest analog on a different port.)
+
+"IFS"/"FFS" is a real 4-channel filament feed/switch system -
+FlashForge's equivalent of an AMS-style multi-material unit
+------------------------------------------------------------------------
+Resolved entirely via SAFE means: offline static analysis of the real
+binaries already extracted locally (extracted/main-update/
+control-extracted/), plus reading the real live Klipper extra and
+config over SSH (read-only). No live /dev/ttyS4 interaction at all,
+zero hardware risk. This is exactly the kind of analysis that already
+worked for the other two boards (see ../main/chip.txt,
+../eboard/chip.txt) and had simply not been done yet for this one.
+
+Firmware-level evidence (from static analysis, done first):
+
+Decoded ifs.hex (the real firmware payload) from Intel HEX to raw
+binary and extracted strings - it's packed with self-documenting
+command/response text:
+  F10 ok. FFS channel 1 feeding.  / FFS channel 2/3/4 feeding.
+  F11 ok. FFS channel 1 exiting.  / channel 2/3/4 exiting.
+  F19 ok. four color. version: 3.0.7
+  F22 ok. ffs_channels_insert: %d
+  F23/F24 ok. chan 1/2/3/4.
+  F39 ok. FFS channel 1/2/3/4 release.
+  F40 ok. stall count: C1: %d C2: %d C3: %d C4: %d
+  F50/F60 ok. GCONF/GSTAT/CHOPCONF/DRV_STATUS/PWMCONF: %02x%02x%02x%02x
+  stepper_motor / stepper_motor_irun
+  silk_state / stall_state / jinsi_GCONF / qiehuan_GCONF
+    (Chinese: jinsi = feed filament in, qiehuan = switch/change over)
+  M38 ok L:%u F:%g X1:%g X2:%g Y:%g Z:%g A:%g B:%g
+
+This is unambiguous: "FFS" = a real 4-CHANNEL FILAMENT FEED/SWITCH
+SYSTEM. "four color. version: 3.0.7" directly confirms it (and
+resolves an earlier open question - the "3.0.7" component of the
+encrypted update package's filename, AD5X-3.1.0-1.1.1-3.0.7-20260515,
+is THIS board's own firmware version, distinct from software 3.1.0 and
+control 1.1.1). GCONF/GSTAT/CHOPCONF/DRV_STATUS/PWMCONF are real TMC-
+family stepper driver register names (matches Klipper's own tmc2209.py
+etc register set) - this board drives its own stepper motor(s) to feed
+and switch between 4 filament channels, functionally FlashForge's
+equivalent of Bambu Lab's AMS or a Prusa MMU. "IFS" as a name likely
+stands for something in this same family (Intelligent/Integrated
+Filament System?) - not confirmed as an exact expansion, but its
+FUNCTION is now confirmed beyond reasonable doubt, unlike the earlier
+"maybe Infrared Filament Sensor" guess, which is now superseded.
+
+This also explains why this printer is internally "AD5X" (see
+../../boot/hardware.txt) despite its AD5M retail badge: AD5X is
+FlashForge's real 4-color model name, and this IFS/FFS 4-channel unit
+is the hardware that makes 4-color printing possible.
+
+CONFIRMED, not just inferred: a real, complete Klipper extra exists -
+/usr/prog/klipper/klippy/extras/zmod_ifs.py (~1430 lines, real
+config section `[zmod_ifs]`, class `zmod_ifs`). Read it in full. It
+implements the ENTIRE real protocol:
+  Port: /dev/ttyS4, 115200 baud, 8N1 (a real pyserial connection, same
+  threaded-reader pattern as zmod_tenz.py's load-cell link, see
+  ../../klipper/load-cell.txt).
+  Real gcode commands: PURGE_PRUTOK_IFS, REMOVE_PRUTOK_IFS,
+  INSERT_PRUTOK_IFS, SET_CURRENT_PRUTOK, ANALOG_PRUTOK, IFS_MOTION,
+  IFS_AUTOINSERT, IFS_STATUS, IFS_EXTRUDER_SENSOR,
+  IFS_REMOVE_(CURRENT_)PRUTOK, plus low-level IFS_F10/F11/F13/F15/F18/
+  F19/F23/F24/F39/F112 mapped directly onto the real board protocol
+  (F10=feed in, F11=extract, F13=poll status, F15=reset driver,
+  F18=unlock all channels, F19=get version, F23=mark channel inserted,
+  F24=clamp/lock a channel, F39=release a channel, F112=force-stop).
+  Real status fields parsed from the board's responses: Ports[] (per-
+  channel filament-present), Silk (loaded bitmap), Stall/Stalls[]
+  (motion-stall detection per channel), State (an FFS_STATUS_* enum -
+  READY/ZAGAT=clamped/ZAGRUZKA=loading/VIGRUZKA=unloading/OTZGAT=
+  releasing/DRV_ERROR), Chan (active channel), Insert/NeedInsert
+  (which channel needs a manual insert).
+  Real config file locations it reads/writes: /usr/prog/config/
+  Adventurer5M.json (channel/color/filament-type selection - the
+  "FFMInfo" section), /usr/data/config/mod_data/filament.json
+  (per-filament-type feed/unload timing+speed settings), /usr/data/
+  config/mod_data/file.json (a slot/channel index mapping).
+
+CRITICAL CONDITIONAL FOUND, confirms this printer's real current
+state: `zmod_ifs.__init__` checks `self.zmod_color.get_display()` (a
+companion extra, `zmod_color`, not yet examined) - if that returns
+True, `color_limit` is forced to 4 but the ENTIRE REST of
+initialization is skipped (no gcode commands registered, no sensor
+thread started, `self.ifs` stays False permanently) - i.e. the whole
+real hardware integration goes inert in that mode. Separately
+confirmed via live grep: `[zmod_ifs]` does NOT appear anywhere in this
+printer's actual active printer.cfg/printer.base.cfg - so on the
+Klipper/Zmod side, this extra isn't even instantiated right now,
+consistent with this specific unit being configured as a plain
+single-color AD5M. HOWEVER: confirmed live via `fuser /dev/ttyS4` that
+the REAL, NATIVE FlashForge app (firmwareExe, PID held it open at
+inspection time) has this port open right now, independent of Klipper
+entirely - so the physical UART is real and something (the native
+touchscreen app, not Klipper) is actively polling it on this exact
+unit, regardless of whether a physical 4-channel feed unit is
+mechanically attached. Whether the physical feed hardware itself is
+present on this specific printer remains unconfirmed either way.
+
+Real tools (re-examined with this new context)
+----------------------------------------------------
+  IFSCommand - confirmed to be SOURCE-IDENTICAL to IAPCommand (see
+    ../eboard/chip.txt): same function names (stm32Sync, stm32Init,
+    stm32Reboot, stm32Write, stm32Close, stm32Connected,
+    stm32UpdateFLag, gpio_export/gpio_unexport/gpio_out/
+    gpio_set_direction/gpio_set_value), same source file names
+    (main.c/hexfile.c/memmap.c/serial.c/stm32.c/gpio.c), same GCC
+    build string, same "stm32isp [Options] <file> <comport>
+    <baudrate>" usage syntax, and even literally prints "IAPCommand:
+    Can not connect to board." as its own hardcoded error text despite
+    being named IFSCommand - this is the exact same STM32 ISP flashing
+    tool, just recompiled/renamed for a different target. CONFIRMS:
+    the IFS/FFS board is ALSO real STM32-ISP-compatible silicon (same
+    class as the eboard), controls a real host-side GPIO reset line
+    the exact same way (see the shared root-cause explanation in
+    ../main/chip.txt and ../eboard/chip.txt), and carries the EXACT
+    SAME real risk profile that caused two outages on the other boards.
+    Real invocation, confirmed from the genuine production run.sh:
+      IFSCommand <ifs.hex> /dev/ttyS4
+    Exactly 2 positional args, same shape as IAPCommand's real
+    invocation - no separate safe/reset-only mode.
+
+  ifsF37 - CORRECTED (was wrongly assumed to be a bootloader-entry prep
+    step; it is not). Its real strings show it's a small INTERACTIVE
+    serial debug/terminal utility, not part of the ISP flashing
+    sequence at all: source file uart.c, functions serial_init/
+    serial_read/serial_write/serial_close, a hardcoded default device
+    of /dev/ttyM0 (a different naming pattern than the real ttyS4 arg
+    it's actually invoked with), and interactive-looking prompts
+    ("Input > ", "Send to %d-> (%s)", "%2x " hex-byte display,
+    "Open %d device fail", "Write/Read serial fail"). Reads user-typed
+    input via fgets(stdin) and echoes bytes out over the given serial
+    port - looks like a manual factory test/debug tool for poking at
+    the FFS board's UART by hand, not an automated part of the real
+    firmware-update flow. In the real run.sh context (non-interactive,
+    no terminal attached), fgets() on a closed/empty stdin returns EOF
+    immediately, so it most likely just prints its prompt once and
+    exits right away without hanging the real update script - plausible
+    explanation for why it's harmlessly present in the real
+    production run.sh sequence ahead of IFSCommand, not confirmed by
+    tracing actual execution.
+
+Still not attempted: any LIVE serial query of /dev/ttyS4 (issuing
+protocol commands ourselves). Given IFSCommand carries the identical
+GPIO-reset risk already demonstrated twice on the other boards, and
+given the goal here (confirming what this subsystem is and how it's
+controlled) is now already achieved through safe static analysis plus
+read-only live config/process inspection, there's no remaining reason
+to touch it live.
+
+The companion `zmod_color` extra (config section `[zmod_color]`,
+1790-line file, mostly slicer color/material-matching logic unrelated
+to IFS specifically) - RESOLVED: `self.display = config.getboolean(
+'display', True)` - a plain config option, DEFAULTING TO TRUE.
+`get_display()` just returns this. So the gate is simple: IFS
+integration stays inert by default on any printer using this Zmod
+version unless its config explicitly sets `display: False` under
+`[zmod_color]` - presumably done deliberately when the physical
+4-channel unit is actually installed. Moot for this specific printer
+either way, since neither [zmod_ifs] nor [zmod_color] appear in its
+active config at all (confirmed earlier).

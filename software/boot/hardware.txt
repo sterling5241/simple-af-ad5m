@@ -1,0 +1,51 @@
+AD5M - HOST SoC / eMMC IDENTITY / NAMING
+============================================
+(See README.txt for the full index.)
+
+Host SoC (confirmed live over SSH, read-only, 2026-09-18)
+---------------------------------------------------------
+Ingenic X2600, MIPS, xburst2-based, dual-core (/proc/cpuinfo,
+/proc/device-tree/compatible = "ingenic,x2600"). NOT Allwinner
+T113-S3 - an early doc-summary fetch guessed wrong before real access;
+disregard that if it comes up anywhere else.
+
+Stock/Zmod OS: Buildroot 2020.02.1, kernel 5.10.186+. Root fs:
+read-only squashfs. /usr/data, /usr/prog, /etc live on separate ext4
+partitions on the internal eMMC (mmcblk0) - see ab-slots.txt for the
+full partition table.
+
+Full eMMC identity (real sysfs registers, /sys/block/mmcblk0/device/*)
+------------------------------------------------------------------------
+eMMC controller "ST74IH", 3200M usable (GPT), kernel reports 7.13 GiB
+raw (difference is the boot0/boot1/rpmb hardware partitions, 4MB each,
+outside the GPT).
+  manufacturer id: 0x0000d5
+  product name:    ST74IH
+  oemid:           0x0130
+  hwrev:           0x0
+  manufacture date: 10/2025 (confirms this specific unit's storage
+                     chip is genuinely recent-production)
+No device-tree model/serial-number files exist at the DT root (only
+subdirectories like chosen/ with bootargs, and the top-level
+compatible string above).
+
+The AD5X / AD5M / FF5M naming gotcha
+-----------------------------------------
+Zmod's own update_mcu.sh branches on `uname -m`:
+  armv7l -> internal platform name "ff5m" (a DIFFERENT ARM SoC, used
+            by AD5M Pro / Creator 5 Pro - not this printer)
+  mips   -> internal platform name "ad5x" (Ingenic X2600 - THIS printer)
+This printer is a plain retail AD5M (not Pro, not AD5X) and reports
+"mips", so it's served by the "ad5x"-named code path. Zmod treats base
+AD5M and AD5X as hardware-identical (same SoC, same MCU, same flash
+tooling) and only distinguishes them via separate ${AD5X}/${AD5M} env
+flags for cosmetic things (control-panel version sort order). Don't
+assume "ad5x" in any script/path means the printer is actually an
+AD5X - check `uname -m` / the real env flags instead.
+
+Confirmed independently, twice: /usr/prog/app_startup.sh's own
+internal strings say `MACHINE=AD5X, PID=0026` - FlashForge's own
+firmware internally calls this board "AD5X" regardless of the AD5M
+retail badge. The real, pristine factory package (see
+../factory-packages/factory-reset.txt) confirms the exact same
+MACHINE=AD5X/PID=0026 strings independently.

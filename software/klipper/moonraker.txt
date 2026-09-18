@@ -1,0 +1,67 @@
+AD5M - KLIPPER/MOONRAKER HOST SOFTWARE STACK
+==================================================
+(See README.txt for the full index. See ../boards/ for the MCUs this
+talks to, and pins.txt for the pin mapping.)
+
+Host software stack (confirmed live over SSH)
+--------------------------------------------------
+Zmod bundles a REAL, full mainline Klipper source checkout at
+/usr/prog/klipper (proper src/, klippy/, lib/, docs/ tree - not a
+stripped rebuild), plus real Moonraker (klipperDaemon / moonrakerDaemon,
+real moonraker.conf at /opt/config/). The host-side stack is the genuine
+upstream project already running here, not a clone/lookalike. This is
+ALSO independently confirmed present directly in FlashForge's own
+factory image, not something Zmod added - see
+../factory-packages/factory-reset.txt.
+
+Real log path
+-----------------
+Real klippy log is /usr/data/logs/printer.log, NOT klippy.log. Found the
+real path in /usr/prog/klipper/klipperDaemon (the actual init script
+this platform uses - there's a second, unused-looking S60klipper
+template under Zmod's own shell/ dir with different paths
+(/root/klipper-env, /data/logFiles/printer.log) that does NOT match
+what's actually running per `ps` - disregard that one for this printer).
+
+Real running processes (ps)
+--------------------------------
+  klippy:    /usr/prog/Python-3.8.2/bin/python3 /usr/prog/klipper/klippy/klippy.py
+             /usr/data/config/printer.cfg -l /usr/data/logs/printer.log
+  moonraker: /root/moonraker-env/bin/python3 /root/moonraker-env/moonraker/moonraker.py
+             -d /root/printer_data   <- real Moonraker data dir is under
+             /root, not /opt/config or /usr/data like the rest of Zmod's
+             layout - a genuine quirk worth remembering if writing any
+             provisioning script that needs to find Moonraker's state.
+
+Correct restart sequence (IMPORTANT - a wrong sequence caused a real
+self-inflicted outage during this project): do NOT call
+/usr/prog/klipper/klipperDaemon START directly - it does not set up
+LD_LIBRARY_PATH and will crash immediately with "error while loading
+shared libraries: libpython3.8.so.1.0". The correct real entrypoint for
+STARTING is /usr/prog/klipper/start.sh, which sets LD_LIBRARY_PATH for
+Python-3.8.2/openssl-1.0.2d/libffi-3.4.4 before calling
+`klipperDaemon start` itself. Real working restart:
+  /usr/prog/klipper/klipperDaemon stop
+  /usr/prog/klipper/start.sh
+Calling `klipperDaemon stop` directly (as shown above) IS safe and
+correct, unlike `start` - stop only sends a signal to the existing
+process via start-stop-daemon, it never invokes the Python interpreter
+itself, so it never touches the missing library path. Only the START
+path actually execs Python and needs the environment start.sh
+provides.
+
+Checking real printer state via Moonraker's local HTTP API (useful for
+confirming health after any restart/incident):
+  LD_LIBRARY_PATH=/usr/prog/curl-7.55.1-https/lib:/usr/prog/openssl-1.0.2d/lib \
+    /usr/prog/curl-7.55.1-https/bin/curl -s http://127.0.0.1:7125/printer/info
+(the bundled curl needs its own LD_LIBRARY_PATH set explicitly too, for
+both libcurl and libssl)
+
+firmwareExe crash history
+------------------------------
+Noticed in /usr/data/logs/: a 137MB firmwareExe.core (crash core dump,
+Aug 18 2026) plus dozens of rotated firmwareExe.log.N files -
+"firmwareExe" is FlashForge's own native control daemon (UI/camera/print
+control), not part of Klipper/Zmod - tangential but flagged in case it
+matters later (this printer has had at least one real firmwareExe
+crash, independent of anything in this project).

@@ -1,0 +1,5 @@
+a1854e689c1937f1f947d18349d289d5  ./ota_config.in
+8fc1a8dc7a02a3bb1bd2932b618e1eaf  ./ota_v1/ota_update.in
+7abac9416384e2ff706c27fd74b436f7  ./ota_v1/ota_md5_xImage.84b161f2c4e3c66a614e5a621d363a30
+84b161f2c4e3c66a614e5a621d363a30  ./ota_v1/xImage.0000.84b161f2c4e3c66a614e5a621d363a30
+d41d8cd98f00b204e9800998ecf8427e  ./ota_v1/ota_v1.ok

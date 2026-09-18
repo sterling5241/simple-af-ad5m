@@ -1,0 +1,156 @@
+AD5M - THE REAL, OFFICIAL A/B KERNEL+ROOTFS+MCU UPDATE MECHANISM
+======================================================================
+(See README.txt for the full index. See ab-slots.txt for the
+partitions this writes to. See ../factory-packages/main-update.txt for
+a real, decrypted, complete update package exercising this exact
+mechanism.)
+
+Found and read the complete real toolkit at /usr/prog/etc/ota_bin/:
+ota_utils.sh, ota_local_method.sh, local_ota_update.sh,
+ota_update_kernel.sh, ota_update_rootfs_squashfs.sh,
+ota_update_rtos_bin.sh, ota_img_data_provider.sh, network_ota_update.sh,
+main_os_info_check.sh, network_main_os_update_recovery.sh,
+network_recovery_update_main_os.sh, recovery_version_utils.sh. This is
+FlashForge's own genuine, native firmware-image update mechanism -
+built into stock, nothing to do with any third-party mod.
+
+Low-level primitives (ota_utils.sh)
+----------------------------------------
+  mmc_name_to_dev <partition_name>  - resolves a GPT partition NAME
+    (e.g. "kernel", "rootfs2", "ota") to its real /dev/mmcblk0pN node by
+    parsing `fdisk -l` output live - not hardcoded partition numbers.
+  mmc_write_str <partition_name> <string>  - literally `echo $str >
+    $dev`. That's the entire "write" primitive - no special tool.
+  mmc_read_str <partition_name>  - `dd if=$dev bs=1 count=256`.
+
+Slot selection logic (ota_local_method.sh) - from the real source
+------------------------------------------------------------------------
+  local_get_kernel_dev_path() / local_get_rootfs_dev_path():
+    read the "ota" partition string, and if it contains "ota:kernel2"
+    (B currently active), return the dev path for the OPPOSITE slot
+    name ("kernel"/"rootfs", the A side) - updates always target the
+    INACTIVE slot, never the one currently running.
+  local_get_current_kernel_dev_path() / local_get_current_rootfs_dev_path():
+    the mirror-image functions - return the CURRENTLY ACTIVE slot
+    instead. Used by check/validation-only scripts (main_os_info_check.sh)
+    that need to size-check against what's running now, not what would
+    be written.
+  local_set_next_boot_device():
+    same read-current-slot logic, then `mmc_write_str ota ota:$name`
+    where $name is the OPPOSITE of whatever's currently active - this
+    one function IS the entire "switch to the other slot" action,
+    called only after a successful write.
+  local_get_rtos_dev_path(): same pattern for a partition literally
+    named "rtos" (MCU/motion-controller firmware) - NOTE: no "rtos"
+    partition exists in this printer's real GPT (only the 7 entries in
+    ab-slots.txt) - this code path is shared/generic across FlashForge
+    models and is unused dead code on this specific board, since this
+    printer's real MCU firmware update path is the separate
+    NationsCommand/IAPCommand-over-UART mechanism (see
+    ../boards/main/chip.txt and ../boards/eboard/chip.txt).
+
+Full update orchestration (local_ota_update.sh, and its variants)
+------------------------------------------------------------------------
+  - Manifest format: `ota_config.in` (has `current_version=`) plus, per
+    version, `ota_v<N>/ota_update.in` with repeated `img_type=
+    kernel|rootfs|rtos` / `img_name=` / `img_size=` / `img_md5=` blocks.
+    Only images listed get updated.
+  - For each requested image type: resolves the real target device via
+    the local_get_*_dev_path functions (always the inactive slot),
+    sanity-checks the partition is big enough, launches
+    ota_update_kernel.sh / ota_update_rootfs_squashfs.sh /
+    ota_update_rtos_bin.sh in the background.
+  - Those scripts each just run: `ota_img_data_provider.sh $name $size
+    > $target_dev` - stream bytes directly into the raw partition
+    device node. ota_img_data_provider.sh itself waits for and `cat`s a
+    sequence of numbered chunk files ($name.0000, $name.0001, ...) as
+    they arrive (each pre-validated by per-chunk MD5 during download) -
+    no special flashing tool or format beyond plain sequential bytes
+    into the block device.
+  - NO CRYPTOGRAPHIC SIGNATURE CHECK ANYWHERE in this entire flow - only
+    MD5 checksums for transfer-integrity, not authenticity.
+  - After ALL requested images finish successfully: calls
+    local_set_next_boot_device() (flips the "ota" pointer to the slot
+    that was just written) and touches /tmp/ota_boot_set as a
+    completion marker. Does NOT reboot itself - something else (not yet
+    identified, likely the calling GUI/app) is expected to reboot
+    afterward. Searched every .sh script under
+    /usr/prog/PROGRAM/software/ (the real touchscreen GUI app's own
+    directory tree) for references to local_ota_update.sh/
+    network_ota_update.sh/ota_boot_set - none of the shell wrapper
+    scripts reference them, meaning the trigger call is compiled
+    directly into the closed-source firmwareExe Qt binary itself, not
+    in any readable shell script. Not pursued further (low value - GUI
+    glue, not part of the actual update mechanism).
+
+The "recovery" mechanism - a second use of the SAME A/B slots
+-------------------------------------------------------------------
+main_os_info_check.sh is a network-based dry-run/version-check variant
+of local_ota_update.sh - same manifest parsing, but only checks device
+sizes against the CURRENTLY ACTIVE slot and reports "ready to update
+main os" - doesn't write anything.
+
+network_main_os_update_recovery.sh downloads a SEPARATE "recovery"
+(rescue) OS payload from a distinct `recovery/` path on the OTA server,
+tracked by its own independent version counter (recovery_version_utils.sh:
+`local_get_recovery_version`/`local_set_recovery_version`, stored at
+/usr/data/.recovery/recovery_version - NOT the same as /etc/ota_info's
+ota_version), and deploys it into the currently-inactive A/B slot using
+the exact same real primitives above (local_get_kernel_dev_path/
+local_get_rootfs_dev_path). It only runs after confirming via
+main_os_info_check.sh that the main OS itself doesn't need updating
+first.
+
+network_recovery_update_main_os.sh is the reverse operation - restores
+the normal main OS back into that slot.
+
+This is a genuinely elegant, unified disaster-recovery design: the SAME
+two physical A/B kernel+rootfs slots serve double duty for both normal
+redundant updates AND deploying/restoring a rescue OS, using the
+identical real write mechanism documented above - no separate recovery
+partition exists on this device.
+
+Current real state (/etc/ota_info, read-only)
+--------------------------------------------------
+  ota_version=0
+  ota_site=http://192.168.43.52/ota/board_test
+`ota_version=0` confirms this device has literally never completed a
+real OTA update since manufacture - consistent with the A==B checksum
+finding in ab-slots.txt. `ota_site` points at a private factory/
+test-network address, not a real production FlashForge update server.
+
+Real concrete example of the update manifest (found on-disk, not
+hypothetical, staged but never applied) at /usr/prog/PROGRAM/kernel/2.0.1/:
+  ota_config.in:          current_version=1
+  ota_v1/ota_update.in:
+    ota_version=1
+    img_type=kernel
+    img_name=xImage
+    img_size=4837440
+    img_md5=0eae9e9bdd619a08a8aee4bb9f84cdc4
+
+    img_type=rootfs
+    img_name=rootfs.squashfs
+    img_size=13107200
+    img_md5=1d0a22a7d596dcbe343a0c920f551d30
+(kernel image is internally called "xImage" here, not "uImage" -
+Ingenic/Xburst-specific naming, still the same uImage container format.
+rootfs.squashfs here is ~12.5MB, much smaller than the 100MB partition -
+matches the "minimal skeleton" finding in ab-slots.txt.) ota_v1.ok is a
+zero-byte marker file (existence-only check). These exact real image
+files, with these exact md5s, are now held locally - see
+../factory-packages/main-update.txt.
+
+Trigger convention (run.sh at /usr/prog/PROGRAM/kernel/2.0.1/run.sh,
+real file): checks `uname -m` = mips and reads
+/sys/block/mmcblk0/device/type + a `dev_type=` field from
+/proc/cmdline to decide between `ota_kernel/` (eMMC path, what this
+printer actually uses) vs `ota_kernel_sd/` (an alternate SD-NAND
+storage variant of this same board family, confirmed to genuinely ship
+a DIFFERENT kernel image - see main-update.txt), then calls
+`local_ota_update.sh $WORK_DIR/ota_kernel/`. This is the SAME
+versioned-directory + run.sh + flag-file trigger convention used for
+BOTH MCU/control firmware updates (PROGRAM/control/<ver>/run.sh, see
+../boards/main/chip.txt and ../boards/eboard/chip.txt) and kernel/
+rootfs OS updates (PROGRAM/kernel/<ver>/run.sh) - one consistent
+deployment pattern across every subsystem.

@@ -1,0 +1,207 @@
+AD5M - REAL OS UPDATE PACKAGE, DECRYPTED (user-provided, 2026-09-18)
+===========================================================================
+(See README.txt for the full index. See ../boot/ota-system.txt for the
+on-device mechanism this package exercises. See factory-reset.txt for
+the separate factory-wipe package.)
+
+The file: AD5X-3.1.0-1.1.1-3.0.7-20260515.tgz (62.3MB), provided by the
+user, matching the real AD5X-*.tgz naming convention from
+../boot/rooting.txt's USB-autorun mechanism.
+
+Despite the .tgz name, its real magic bytes are "Salted__" - OpenSSL's
+`enc -salt` encrypted-file header. The full official OS+control update
+package IS ENCRYPTED.
+
+Found the decryption key/method
+------------------------------------
+Pulled /usr/prog/mytar (a tiny real binary, referenced by
+app_startup.sh) out of the extracted factory tree (see
+factory-reset.txt) and dumped its strings. It contains, in plaintext,
+the exact command it runs via system():
+  openssl des3 -d -k FFP0302~%@ffroot800 -salt -in %s | tar xvf - -C /usr/data/update/
+Key: `FFP0302~%@ffroot800`, cipher DES3 (des-ede3-cbc), OpenSSL
+`Salted__` format. Verified byte-exact via a raw hex dump around the
+string in the binary (no truncation/extraction error).
+
+Decrypted locally with modern OpenSSL 3.5.7:
+  openssl enc -des3 -d -k 'FFP0302~%@ffroot800' -md md5 -salt -in <file> -out out.tar
+IMPORTANT: modern OpenSSL's `enc` no longer defaults to MD5 for its
+legacy key-derivation function the way OpenSSL 1.0.2d (what this
+device actually bundles/was built against) did - `-md md5` must be
+passed explicitly or it fails with "bad decrypt". This is the
+complete, working, real recipe for decrypting any FlashForge AD5X/AD5M
+update package obtained in the future.
+
+Decrypted contents (despite .tar.xz names, these are actually PLAIN
+uncompressed tar - same pattern as factory-reset.txt's package, use
+`tar -xf` not `-xJf`):
+  control-1.1.1.tar.xz   (3.4MB)  - real MCU/control firmware package
+  kernel-2.0.1.tar.xz    (22.8MB) - real kernel+rootfs OTA package
+  library-2.0.1.tar.xz   (15.6MB) - system library update - extracted,
+                                     see "library and software packages"
+                                     section below
+  software-3.1.0.tar.xz  (14.2MB) - real touchscreen GUI app update -
+                                     extracted, see below (this one
+                                     turned up a real, important
+                                     correction - read it)
+  flashforge_init.sh     (7143 bytes - a DIFFERENT, bigger script than
+                          factory-reset.txt's one - the real top-level
+                          ORCHESTRATOR for a normal OS update, not a
+                          factory wipe)
+  start.img / end.img    - framebuffer splash images shown at the very
+                          start/end of the whole update
+  play                   - a small binary run at the very end (likely
+                          plays a completion sound/chime)
+Local path: C:\Users\me\Desktop\simple af ad5m\extracted\main-update\
+
+The real OS-update flashforge_init.sh - the master orchestrator
+------------------------------------------------------------------------
+Read in full - ties every piece already documented in
+../boot/ota-system.txt and ../boards/ together. Described below in the
+order the functions are DEFINED in the script, which is NOT the real
+execution order - the real call order at the bottom of the script is:
+update_other, update_control, update_kernel, update_software,
+update_library (create_key is commented out, never called). Notably,
+update_other runs FIRST, before kernel/control, not last.
+
+  - Same MACHINE=AD5X/PID=0026 safety check as the factory-reset one,
+    but with a real, documented BYPASS: if a file named `screwflag`
+    sits alongside this script, the machine-type check is skipped
+    entirely ("screwflag" = a real factory/production marker, per its
+    own Chinese comment: present "in the factory, can upgrade
+    arbitrarily").
+
+  - update_kernel(): finds the newest local `kernel-*.tar.xz`,
+    extracts it to a temp dir under /usr/prog/PROGRAM/kernel/, verifies
+    `md5sum.list`, moves it into place as .../kernel/<version>/, then
+    runs that version's own run.sh - this IS exactly the real
+    PROGRAM/kernel/2.0.1/run.sh already documented in
+    ../boot/ota-system.txt, now confirmed as the genuine,
+    currently-shipping kernel package (not a stale leftover).
+
+  - update_control(): same pattern for control-*.tar.xz into
+    /usr/prog/PROGRAM/control/<version>/, but does NOT run run.sh
+    immediately (that call is commented out) - confirms the two-phase
+    design: this step only STAGES the control firmware. The real
+    Update/UpdateM trigger flag files ship AS PART OF the
+    control-1.1.1.tar.xz payload itself (confirmed - both are present,
+    real, empty 0-byte files inside the extracted package) - so once
+    staged, they're already in place for app_startup.sh's
+    CONTRIL_FLAG/CONTRIL_M check to find and run ./run.sh on the NEXT
+    boot. No separate "set the flag" step exists - shipping the flag
+    files IS the mechanism.
+
+  - update_software(): same pattern for software-*.tar.xz into
+    /usr/prog/PROGRAM/software/<version>/, DOES run run.sh immediately
+    (updates/restarts the touchscreen GUI app right away).
+
+  - update_library(): same pattern for library-*.tar.xz.
+
+  - update_other(): a real grab-bag bucket, not versioned/staged like
+    the others - its ENTIRE body is gated behind `if [ -d
+    $WORK_DIR/other ]`. Reading the script's logic, IF an other/
+    directory is present it would: copy mytar/mencoder/freecach.sh to
+    /usr/prog/; extract klippy.tar directly into /usr/prog/klipper/
+    (Klipper itself would update through this bucket, not through
+    kernel/control/software); copy fileSlotId.json and a default
+    printer.cfg to /usr/data/config/; extract libzip if missing;
+    extract nim.tar; copy the wifi driver module 8821cu.ko + its
+    config; copy the sample FlashForge-TestModel-01.3mf test print
+    file. IMPORTANT CAVEAT: checked the real decrypted package
+    (extracted/main-update/) directly - it does NOT contain an other/
+    directory at all, and none of mytar/mencoder/freecach.sh/
+    klippy.tar/libzip-1.10.1.tar/nim.tar/8821cu.ko/
+    FlashForge-TestModel-01.3mf exist anywhere in it. So for THIS real
+    package, update_other() is effectively a no-op (just clears
+    /usr/data/logs/NIM/* and copies start.img) - the klippy.tar/
+    Klipper-update behavior above is what the script's code is
+    CAPABLE of doing if given an other/ directory, not something
+    observed actually happening in this specific real update. Whether
+    a real other/ directory ships in some other version's package is
+    unconfirmed.
+
+  - A `create_key()` function exists (openssl genrsa -des3, generates
+    /usr/prog/private.pem + key.pub/key.priv, password "abcd") but is
+    NOT called anywhere in the real flow (commented out: "#create_key")
+    - real, present, but dead/unused code in this version - possibly
+    scaffolding for a future signing/identity mechanism, not active.
+
+Extracted kernel-2.0.1.tar.xz and control-1.1.1.tar.xz in full
+------------------------------------------------------------------------
+Local paths: extracted/main-update/kernel-extracted/ and
+control-extracted/. Now have REAL, GENUINE local copies of:
+
+  - xImage.0000.0eae9e9bdd619a08a8aee4bb9f84cdc4 - the actual real
+    kernel image chunk (matches the uImage format decoded in
+    ../boot/ab-slots.txt)
+  - rootfs.squashfs.0000.1d0a22a7d596dcbe343a0c920f551d30 - the actual
+    real rootfs squashfs image chunk
+  - A SECOND kernel variant under ota_kernel_sd/ with a DIFFERENT
+    xImage checksum (84b161f2c4e3c66a614e5a621d363a30) - confirms,
+    with real evidence now, that the SD-NAND storage variant of this
+    board family genuinely ships a different kernel image, not just a
+    different code path (see ../boot/ota-system.txt's run.sh
+    discussion).
+  - AD5X.bin, ADM_App.hex, ifs.hex + NationsCommand/IAPCommand/
+    IFSCommand/ifsF37, mcu.img, real md5sum.list, real Update/UpdateM
+    (0-byte) flag files - a complete, current, genuine control-firmware
+    release, independently confirming everything in ../boards/main/
+    and ../boards/eboard/.
+
+These real image/chunk files exactly match the "leftover" ones found
+earlier directly on the live printer at
+/usr/prog/PROGRAM/kernel/2.0.1/ota_kernel/ota_v1/ (identical md5s) -
+confirms those live leftovers were genuinely staged from a real
+kernel-2.0.1 update at some point (never actually applied, per
+ota_version=0 in ../boot/ota-system.txt, but genuinely real staged
+data, not random cruft).
+
+Extracted library-2.0.1.tar.xz and software-3.1.0.tar.xz - IMPORTANT correction found
+------------------------------------------------------------------------------------------
+Both plain uncompressed tar again, same pattern. Local paths:
+extracted/main-update/library-extracted/ and software-extracted/.
+
+library-2.0.1.tar.xz: simple - just nim.tar (the Nim-language runtime
+library referenced by update_other()/update_library() elsewhere) plus
+its own real run.sh, which does exactly what was already inferred:
+extracts nim.tar into /usr/prog/. Nothing new here beyond confirming
+the pattern.
+
+software-3.1.0.tar.xz: the REAL, current touchscreen-GUI update
+package. Contains real files: app_startup.sh, firmwareExe (the actual
+GUI binary), run.sh, start.sh, sys_start.sh, freecach.sh, ntpclient,
+printer.base.cfg, and FOUR real Klipper Python files - extruder.py,
+exclude_object.py, virtual_sdcard.py, query_adc.py. Its real run.sh
+copies these to real live locations: app_startup.sh and sys_start.sh/
+freecach.sh straight to /usr/prog/, firmwareExe to
+/usr/prog/PROGRAM/software/, printer.base.cfg to /usr/data/config/,
+start.sh to /usr/prog/klipper/, and - notably - extruder.py to
+/usr/prog/klipper/klippy/kinematics/ and the other three .py files to
+/usr/prog/klipper/klippy/extras/. CONFIRMS a real, additional Klipper-
+update path distinct from the klippy.tar bucket theorized in
+update_other() (see above) - this "software" package patches specific
+individual Klipper Python files directly, a real, actually-exercised
+mechanism (unlike klippy.tar, which was never observed in this
+specific real package).
+
+IMPORTANT CORRECTION to factory-reset.txt's app_startup.sh comparison:
+this package's app_startup.sh is NOT identical to the "pristine"
+factory-reset.txt reference copy - diffed directly, it has TWO EXTRA
+lines the pristine copy doesn't:
+  chmod a+x /usr/prog/mencoder
+  chmod a+x /usr/prog/mytar
+These are NOT Zmod's doing - they're a real, separate FlashForge-side
+evolution of app_startup.sh between whatever older snapshot
+AD5X-factory.tar.xz represents and this newer software-3.1.0 release.
+(These same two lines are ALSO present in the live printer's actual
+current app_startup.sh, confirming the live device is running this
+newer baseline, with Zmod's own two real edits layered on top of it -
+see ../boot/rooting.txt.) So there are genuinely TWO separate layers of
+change to this one script: FlashForge's own real version-to-version
+evolution (this finding), and Zmod's own additions on top of whatever
+FlashForge baseline was present at install time (already documented).
+factory-reset.txt's "Zmod's changes are exactly two lines" comparison
+was against an OLDER real FlashForge baseline, not the current one -
+still an accurate, useful comparison for isolating Zmod's own edits,
+just worth knowing it's comparing against an old snapshot, not
+necessarily today's real stock file.

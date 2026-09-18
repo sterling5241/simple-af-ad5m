@@ -1,0 +1,152 @@
+AD5M - REAL FACTORY-RESET PACKAGE (user-provided, 2026-09-18)
+====================================================================
+(See README.txt for the full index. See ../boot/rooting.txt for the
+USB-autorun mechanism this rides on. See main-update.txt for the
+separate, encrypted, full OS-update package.)
+
+Two real files obtained and cross-checked against a real md5:
+  AD5X-factory-1.0.9.tgz  (215KB) - the real installer script + status
+                                     screens
+  AD5X-factory.tar.xz     (139.4MB) - the actual factory-fresh payload
+
+Real file formats (despite names) - checked real magic bytes:
+  - AD5X-factory-1.0.9.tgz is actually a PLAIN, UNCOMPRESSED tar (its
+    first bytes are literally the ASCII filename "flashforge_init.sh",
+    the start of a standard tar header block) - extractable directly
+    with `tar -xf`, not `-xzf`.
+  - AD5X-factory.tar.xz has the real, standard XZ magic (0xFD 37 7A
+    58 5A 00) - genuinely unencrypted, standard xz-compressed tar,
+    `tar -xJf`.
+
+Extracted AD5X-factory-1.0.9.tgz - real contents:
+  flashforge_init.sh          <- the REAL script (this specific
+                                  factory-reset variant - a DIFFERENT,
+                                  smaller script than the OS-update
+                                  orchestrator in main-update.txt)
+  img/*.raw.xz + img/*.png    <- paired status screens shown on the
+                                  real touchscreen (/dev/fb0) during
+                                  install: check/install/extract/copy/
+                                  config/complete/error/notfound/
+                                  nospace/md5 - one pair per install step
+  img/1.sh                    <- the asset-authoring helper: PNG ->
+                                  raw RGBA (imagemagick `convert`) -> xz
+  md5.txt                     <- "0e7a275d4aaccbca478e97e04b0413c8
+                                  /usr/data/AD5X-factory.tar.xz" -
+                                  VERIFIED: this EXACTLY matches the
+                                  real md5 of the user's provided
+                                  AD5X-factory.tar.xz file. These two
+                                  files are a real, matched, genuine
+                                  installer pair.
+
+The real flashforge_init.sh (factory-reset variant) - full behavior
+-------------------------------------------------------------------------
+This is THE actual, complete factory-reprovisioning mechanism (a full
+destructive reset/reflash of the persistent application layer,
+triggered from USB):
+
+  install_prepare(): safety check - MACHINE must be "AD5X", PID "0026",
+    uname -m "mips" (else shows factory-error.raw.xz and exits). Same
+    check as ../boot/hardware.txt's naming-gotcha section.
+
+  install_factory():
+    - refuses to run if Zmod is currently mounted ("Mod launched.
+      Installation is prohibited.") - a real, built-in protection
+      against running this while a mod is active.
+    - requires >=800MB free on /usr/data (else factory-nospace screen)
+    - requires /mnt/AD5X-factory.tar.xz present on the USB drive (else
+      factory-notfound screen), copies it to /usr/data/, and requires
+      its md5 to match md5.txt exactly (else factory-md5 screen)
+    - preserves the real printer serial number (reads
+      printerSerialNumber from /usr/prog/config/Adventurer5M.json
+      first)
+    - WIPES: /usr/prog/logo.jpeg, /usr/prog/etc/, /usr/prog/PROGRAM/,
+      /usr/data/logs/*, /usr/data/config/mod_data, /usr/data/config/mod,
+      /usr/data/.mod/ (this deletes ALL of Zmod's persistence too, by
+      construction, along with the entire real application stack)
+    - EXTRACTS: `xz -dc AD5X-factory.tar.xz | tar -xf - -C /` - the
+      WHOLE factory.tar.xz payload gets extracted directly onto the
+      root filesystem. Since squashfs / is read-only, this really
+      means it repopulates /usr/prog (usershare, writable ext4) and
+      /usr/data (userdata, writable ext4) from scratch - THE real
+      mechanism for restoring/reprovisioning the entire persistent
+      application layer, independent of and unrelated to the A/B
+      kernel/rootfs OTA slots (see ../boot/ab-slots.txt).
+    - re-injects the preserved serial number back into the freshly
+      extracted Adventurer5M.json (sed replaces a placeholder
+      "SNMQQE9100319")
+    - optional second overlay: if /mnt/config.tar also exists on the
+      USB drive, extracts that on top too (a documented, real
+      user-customization layer separate from the main factory payload)
+
+  Whole thing runs framebuffer status screens throughout, reboots via
+  sysrq (`echo b > /proc/sysrq-trigger`) on completion.
+
+Extracted AD5X-factory.tar.xz in full - what's really inside
+-------------------------------------------------------------------
+139MB compressed, 798MB extracted, verified md5 match against md5.txt
+first. Real counted total: 14,637 regular files (15,605 filesystem
+entries including directories) under extracted/factory-full/. A
+COMPLETE, genuine, pristine snapshot of
+/usr/prog and /usr/data as FlashForge ships them, before any
+Zmod/user modification. Local path:
+C:\Users\me\Desktop\simple af ad5m\extracted\factory-full\
+
+Highlights:
+
+  - usr/prog/app_startup.sh: the PRISTINE, never-Zmod-patched
+    original. Read it in full and compared directly against the live
+    modified version (see ../boot/rooting.txt) - CONFIRMS, with an
+    actual reference copy (not inference), that Zmod's changes TO THIS
+    ONE SCRIPT are exactly the two inserted lines already documented
+    (`mount --bind /bin/echo /usr/bin/cmd_pwm` + a Zmod script call
+    after `mount /usr/prog/etc /etc`, and another Zmod script call
+    appended at the very end) - nothing else in app_startup.sh differs.
+    IMPORTANT SCOPE NOTE: this is specifically about app_startup.sh,
+    not a claim that Zmod's overall footprint is small - Zmod ALSO
+    ships its own rebuilt MCU firmware on both boards, not stock
+    copies (different checksums from the genuine factory firmware) -
+    see ../boards/main/chip.txt and ../boards/eboard/chip.txt. ALSO:
+    this factory.tar.xz snapshot's app_startup.sh is itself an OLDER
+    real FlashForge baseline - the newer software-3.1.0 update package
+    (see main-update.txt) ships a real app_startup.sh with 2 more
+    lines that are FlashForge's own evolution, not Zmod's - this
+    comparison isolates Zmod's edits correctly, but isn't a comparison
+    against today's absolute-latest real stock file. See
+    main-update.txt for the full breakdown.
+
+  - usr/prog/etc/ota_bin/ has MORE real scripts than what's on the
+    live printer's current install - all now read and documented in
+    ../boot/ota-system.txt (main_os_info_check.sh,
+    network_main_os_update_recovery.sh,
+    network_recovery_update_main_os.sh, recovery_version_utils.sh).
+
+  - usr/prog/klipper/ - a complete, real Klipper source tree ships
+    directly in the FACTORY image itself (not something Zmod adds) -
+    direct, physical confirmation that FlashForge's stock firmware
+    genuinely includes real Klipper, not inferred from protocol
+    version numbers alone. No .config Kconfig build artifact present
+    (expected - only compiled output ships, not the build config).
+
+  - usr/prog/PROGRAM/control/1.0.6/ - a REAL, complete, versioned
+    control-firmware update package (an OLDER version than the 1.1.1
+    one in main-update.txt). Confirmed REAL empty Update and UpdateM
+    files (0 bytes each) - genuine trigger-flag artifacts. Contents:
+    AD5X.bin (mainboard MCU firmware, older version), ADM_App.hex (the
+    REAL original name for the eboard firmware - see
+    ../boards/eboard/chip.txt), NationsCommand, IAPCommand, and -
+    important - ifs.hex/IFSCommand/ifsF37, the first evidence of the
+    4th, previously-unknown subsystem (see ../boards/ifs/chip.txt).
+    Real run.sh here gave the exact, 100%-authoritative real
+    invocations for both flash tools, now documented in
+    ../boards/main/chip.txt and ../boards/eboard/chip.txt.
+
+  - usr/data/config/printer.cfg + printer.base.cfg (pristine factory
+    version): read in full, directly comparable to the live device's
+    actual config (see ../klipper/pins.txt). Nearly identical - same
+    pin mapping throughout, same kinematics, same general structure.
+    Minor real differences: slightly different TMC2209 z-stepper
+    run_current, an extra max_accel_to_decel line, a plain
+    [fan_generic pcb_fan] section instead of the live device's
+    [controller_fan driver_fan] - minor version drift, not a
+    structural difference. Confirms the pin-mapping work is accurate
+    against a genuine factory reference, not just self-consistent.

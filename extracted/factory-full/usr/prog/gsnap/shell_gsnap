@@ -1,0 +1,8 @@
+
+export LD_LIBRARY_PATH=/usr/prog/gsnap/jpeg/lib:$LD_LIBRARY_PATH
+
+info=`date +%s`
+/usr/prog/gsnap/gsnapexe /media/$info.jpg /dev/fb0
+sync
+#cp -f $1.jpg /media
+echo $info

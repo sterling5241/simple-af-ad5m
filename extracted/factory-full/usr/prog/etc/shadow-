@@ -1,0 +1,10 @@
+root:$1$zRCElpka$zrG5tUlfB3etb.B6tFhRc0:19723::::::
+daemon:*:::::::
+bin:*:::::::
+sys:*:::::::
+sync:*:::::::
+mail:*:::::::
+www-data:*:::::::
+operator:*:::::::
+nobody:*:::::::
+dbus:*:::::::

@@ -1,0 +1,65 @@
+AD5M - ROOTING / THE REAL USB-AUTORUN INJECTION MECHANISM
+================================================================
+(See README.txt for the full index. See hardware.txt for SoC/eMMC
+identity this all runs on top of.)
+
+Rooting: no exploit needed
+------------------------------
+Confirmed by reading /etc/init.d/S50dropbear: it's the completely
+generic, unmodified Buildroot/BusyBox skeleton dropbear-start script -
+no FlashForge or Zmod customization in it at all. Combined with the
+already-confirmed root:root login working: the AD5M ships from the
+factory with SSH root access already turned on and a trivial default
+password. No jailbreak, no exploit chain, no signed-firmware bypass
+needed to get a root shell - just SSH in.
+
+Platform difference worth remembering: on the ARM/armv7l platform
+(AD5M Pro/Creator5Pro), Zmod's own uninstaller shows it has to remove
+its OWN SSH install (S50sshd, dropbearmulti, dropbear, dropbearkey,
+scp, S60dropbear) - meaning stock firmware on THAT platform does NOT
+ship SSH by default, unlike this mips/ad5x platform where it's
+genuinely factory-shipped. Not universal across the whole AD5M/Zmod
+family.
+
+The real, official update/injection mechanism: unauthenticated USB autorun
+-----------------------------------------------------------------------------
+Read the real, live /usr/prog/app_startup.sh (FlashForge's own boot
+script, confirmed genuine - and separately confirmed against a
+pristine factory copy, see ../factory-packages/factory-reset.txt). On
+EVERY boot, before starting the real touchscreen application, it:
+  - Loops over /dev/sda, /dev/sda1..4 (any USB drive) and mounts it
+  - Looks for a file matching /mnt/AD5X-*.tgz (FlashForge's official
+    update package naming). If found: copies it to /usr/data/, extracts
+    it with a bundled `mytar` tool, and if the extracted payload
+    contains flashforge_init.sh, RUNS IT AS ROOT:
+    `/usr/data/update/flashforge_init.sh AD5X 0026`
+  - ALSO, even simpler fallback: if the USB drive just has a bare
+    /mnt/flashforge_init.sh sitting on it directly (no .tgz, no naming
+    convention needed) - that gets chmod +x'd and run as root too.
+No signature/authenticity check is visible anywhere in this script.
+This is FlashForge's real, intended firmware-update channel, and it's
+wide open: drop a script on a FAT USB stick, plug it in, power on, it
+runs as root. This is the exact mechanism the whole AD5M modding scene
+(Zmod, xblax's mod) rides on - not a discovered vulnerability, just
+FlashForge's own unauthenticated update design.
+
+Also explains an earlier mystery: /etc being on ext4 mmcblk0p6 (not
+part of the read-only squashfs) - app_startup.sh itself does this,
+copying /etc to /usr/prog/etc once and bind-mounting it back over /etc
+on every boot, making /etc persistent/writable. Stock FlashForge
+behavior, not a Zmod addition.
+
+app_startup.sh also does one more real thing on every boot relevant to
+updates: it checks for a real CONTRIL_FLAG/CONTRIL_M pair of trigger
+files under /usr/prog/PROGRAM/control/<newest-version>/ and, if either
+exists, runs that version's own run.sh (the real MCU-firmware flashing
+step) before continuing to start the touchscreen app. See
+../factory-packages/main-update.txt for exactly how those trigger
+files get there in the first place (they ship bundled inside the real
+control-firmware update package itself).
+
+Where this leads: see ota-system.txt for what actually runs once
+flashforge_init.sh is triggered (the real A/B kernel+rootfs+control
+update mechanism), and ../factory-packages/ for two real, genuine
+FlashForge packages obtained and picked apart using exactly this real
+channel's file-naming conventions.

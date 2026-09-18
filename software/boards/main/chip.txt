@@ -1,0 +1,174 @@
+AD5M - MAINBOARD MCU (the "main" board)
+==============================================
+(See README.txt for the full index. See ../eboard/chip.txt for the
+toolhead MCU, ../ifs/chip.txt for the 4th, unidentified subsystem.)
+
+Identity: Nations Technologies N32G45x family
+-----------------------------------------------
+Cortex-M4, STM32-pin-compatible Chinese clone vendor. Confirmed two
+ways:
+  1. mainboard flash tool is literally called "NationsCommand" (see
+     update_mcu.sh, function update_mcu_mainboard(), "--fn
+     $FIRMWARE_Board_M3 --v -r")
+  2. mainline Klipper's own bundled source tree already includes
+     lib/n32g45x
+
+Zmod ships its OWN BUILD of this firmware, not a stock copy - checked
+directly: the genuine stock factory AD5X.bin (extracted/main-update/
+control-extracted/, from the real decrypted 1.1.1 control package, and
+also identical to the OLDER 1.0.6 factory snapshot - stock hasn't
+changed between those versions) is 37,504 bytes, md5
+522b4641821016952cd4504e4c2177ed. The live printer's actual
+Mainboard.bin (pulled via pscp, firmware-recon/Mainboard.bin) is
+37,792 bytes, md5 91f326f1a5eb4866bc16b670ca80c1d1 - different size,
+different checksum. Same pattern confirmed on the eboard - see
+../eboard/chip.txt. Zmod's real footprint includes recompiled MCU
+firmware on both boards, not just the host-side app_startup.sh script
+edits documented in ../../factory-packages/factory-reset.txt.
+Firmware binary: /usr/data/zmod/klipper/mcu/ad5x/Mainboard.bin (37792
+bytes). Pulled it locally (../../../firmware-recon/Mainboard.bin) via
+`pscp -scp` (printer has no sftp-server, plain scp works) and extracted
+printable strings - no CanBoot marker, just raw compiled ARM Thumb
+code, consistent with N32's own USART ISP bootloader protocol (what
+"NationsCommand" implements) rather than a software bootloader baked
+into the image.
+
+Wiring: [mcu] -> /dev/ttyS2, 230400 baud, real UART (not USB-CDC like
+Creality's K1). See ../../klipper/pins.txt for the full real GPIO pin
+mapping on this chip.
+
+DEFINITIVE confirmation from Klipper's own live MCU handshake (pulled
+from the real printer.log, /usr/data/logs/printer.log):
+  Loaded MCU 'mcu' 116 commands (?-20241125_172251-ubuntu / gcc: 9.2.1 ...)
+  MCU 'mcu' config: ADC_MAX=4095 ... CLOCK_FREQ=144000000 MCU=stm32f103xe
+    PWM_MAX=255 ... SERIAL_BAUD=230400 STEPPER_BOTH_EDGE=1 ...
+Reports MCU=stm32f103xe at 144MHz clock. Consistent with real silicon =
+Nations N32G45x: Klipper's MACH_N32G45x Kconfig option, by design, sets
+CONFIG_MCU="stm32f103xe" because N32G45x is a register/peripheral-
+compatible clone of STM32F103xE - intended, documented mechanism, not a
+coincidence. 144MHz is this board's own CONFIG_CLOCK_FREQ override, a
+normal STM32F103 overclock value in the Klipper community.
+
+pellcorp/kalico already has Kconfig support for this exact chip family
+(checked src/stm32/Kconfig directly on GitHub, branch aug2026):
+  config MACH_N32G452  bool "Nation N32G452"  select MACH_N32G45x, MACH_STM32F1
+  config MACH_N32G455  bool "Nation N32G455"  select MACH_N32G45x, MACH_STM32F1
+MCU string defaults to "stm32f103xe" if MACH_N32G45x, clock defaults
+64MHz (internal ref) / 128MHz, flash region 0x20000 (128KB), bootloader
+region reserved 0x10000 (64KB). This means the MCU-firmware-build side
+of adding real support for this chip is mostly picking the right
+existing Kconfig option and pin mapping, not writing new chip support
+from scratch. (Creality's own K1/Ender3V3 family runs a totally
+different chip, GD32F303 from GigaDevice - no existing preset to copy,
+but the Kconfig plumbing for THIS chip already exists upstream.)
+
+Exact variant (N32G452 vs N32G455) - attempted, got real chip data,
+not fully resolved
+------------------------------------------------------------------------
+Pulled the real flash tool binaries locally
+(/usr/prog/PROGRAM/control/1.1.1/NationsCommand, via pscp -scp).
+NationsCommand's own C++ symbol names (`N32Isp::connected_to_N32G45x`,
+`N32Isp::disconnected_N32G45X`, class `N32Isp`/`ISPCommand`) confirm
+it's written generically against the whole "N32G45x" family, not
+hardcoded to a specific 452-vs-455 sub-variant - the tool itself
+doesn't encode which one this board uses. It DOES have a real "Get
+chip information"/`get_chip_info()` command, but it's not a
+standalone CLI flag - bundled inside `-c` (establish connection)
+itself.
+
+Real tool CLI (complete, from --help / no-args output):
+  -?  (Show help)          -m  (Enum COM port)
+  -c  (Establish connection)   --pn port_nb (default 1)  --br baud_rate
+      (default 115200)  --db data_bits  --pr parity  --sb stop_bits
+  -d  (Download file into MCU flash)  --a addr (default 0x08000000)
+      --fn <file>  --eall  --esec  --v (verify)
+  -e  (Erase all pages)
+  -r  (Reset the chip)
+  -j  (Jump after download)
+The REAL, only-ever-used stock invocation (confirmed from TWO
+independent real sources - Zmod's update_mcu.sh AND the genuine
+factory package's PROGRAM/control/1.1.1/run.sh, see
+../../factory-packages/main-update.txt):
+  NationsCommand -c -d --fn <AD5X.bin> --v -r
+Always the full connect+download+verify+reset combo in one shot, no
+`--pn` override (uses default port 1), no `--br` override. Never `-c`
+alone anywhere in the real system.
+
+INCIDENT, 2026-09-18: with explicit permission (printer idle), stopped
+Klipper and ran `NationsCommand -c --pn 1` and `-c --pn 2` (bare
+connect, no `-d`, no `-r`) to try to safely query chip info. Every
+attempt reported total failure ("open serial device error"/"serial is
+close") across all 4 auto-tried baud rates (9600/19200/38400/115200,
+each tried twice). Despite that, Klipper could no longer connect to
+this MCU afterward ("Unable to connect"/"Serial connection closed") -
+reproducible across multiple clean stop/start cycles, confirmed NOT a
+host-side issue (stty settings still correct 230400 8N1, nothing else
+held the port per fuser/lsof). Root cause: bare `-c` with no
+subsequent `-r` is a code path never exercised anywhere in the real,
+tested, working system (see the real invocation above) - it very
+likely leaves the chip sitting in its ISP/bootloader wait-state with
+no instruction to hand control back to the application firmware.
+RECOVERED ONLY VIA A REAL PHYSICAL POWER CYCLE (confirmed via
+Moonraker's /printer/info going from "state":"error" back to
+"state":"ready"). A software-level Linux `reboot` was never tried, so
+it's not confirmed whether that alone would have been sufficient.
+
+FOLLOW-UP, same day, explicit permission to retry: ran
+`NationsCommand -c -r` (connect + explicit reset, no `-d`/no flash
+write - the real stock shape minus only the destructive download
+step). This time it worked cleanly - real chip data came back, and
+Klipper reconnected to both MCUs normally afterward with no issues.
+Real output:
+  Connect the device at baudrate 9600
+  Get chip information ...
+  BOOT Command Version:V:22
+  BOOT SubVersion:V25
+  UCID:0xa01112b8504150473533303036125
+  UID:0xa011150415047353336125
+  Reset chip ...
+Doesn't spell out "N32G452" vs "N32G455" as a plain string. Decoding
+part of the UCID hex as ASCII bytes (50 41 50 47 35 33 30 30 36 ->
+"PAPG53006") produces a readable string that may be a lot/part code
+baked into the unique ID - plausible but not cross-checked against
+anything, so not asserted as the confirmed part number.
+CONCLUSION: `-c -r` (connect + reset, no download) is a real, working,
+safe way to interact with this chip without touching flash - `-c`
+alone is not. Not pursued further past this point.
+
+SAFER alternative, used successfully: Klipper's own stock scripts/
+dump_mcu.py (read-only debug_read over the normal Klipper protocol, no
+vendor tool/GPIO) reads the chip ID area of a RUNNING MCU. Run on this
+mainboard (/dev/ttyS2, 2026-09-18, user-approved, Klipper stopped then
+restored cleanly) - 64 bytes from 0x1FFFF7C0:
+  1FFFF7C0: a0 01 11 2b 08 50 41 50 47 35 33 30 30 03 61 25
+  1FFFF7D0: 4e 06 5c 06 b1 f9 a3 f9 ff ff ff ff ff ff ff ff
+  1FFFF7E0: 8f ff cf 3f 70 00 30 c0 00 02 ff fd 80 00 7f ff
+  1FFFF7F0: a0 01 11 50 41 50 47 35 33 03 61 25 11 45 58 8f
+VALIDATED: this matches NationsCommand's output byte-for-byte once the
+tool's dropped leading zeros are restored - its "UCID" a01112b85041504
+73533303036125 = bytes a0 01 11 2b 08 50 41 50 47 35 33 30 30 03 61 25
+(the 16 bytes at 0x1FFFF7C0), and its "UID" a011150415047353336125 =
+a0 01 11 50 41 50 47 35 33 03 61 25 (12 bytes at 0x1FFFF7F0). So the
+Nations layout is CONFIRMED: 128-bit UCID at 0x1FFFF7C0, 96-bit UID at
+0x1FFFF7F0, ASCII lot code "PAPG5300" inside both. (The earlier
+"PAPG53006" decode was really "PAPG5300" plus the next byte 0x03.)
+This also proves dump_mcu.py is a safe, equivalent, tool-free way to
+get this data - the same values, with no GPIO/bootloader involvement.
+Compared with the eboard's dump (../eboard/chip.txt), the 0x1FFFF7E0
+block has the same structure with different values - see there.
+
+Root cause of the outage, found on deeper inspection (applies to BOTH
+this board and the eboard - see ../eboard/chip.txt for the matching
+second incident): NationsCommand statically links a real Gpio.cpp
+module (`gpio_export`, `gpio_unexport`, `gpio_out`, `gpio_set_direction`,
+`gpio_set_value`, via the standard Linux `/sys/class/gpio` sysfs
+interface). This means the tool controls a real HOST-SIDE GPIO pin as
+part of its connect/reset sequence - almost certainly this MCU's
+physical hardware reset line, NOT DTR/RTS serial control lines as
+originally guessed. A failed/interrupted handshake leaves that GPIO
+asserted (holding the chip in reset/ISP-wait), completely invisible to
+and unfixable by Klipper/klippy, which has no knowledge of that GPIO
+at all - only a real power cycle unconditionally clears it. The exact
+GPIO number is not statically discoverable (not in device-tree, not in
+dmesg - chosen at runtime inside the compiled binary). Not pursued
+further given the real risk already demonstrated.

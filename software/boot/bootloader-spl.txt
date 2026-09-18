@@ -1,0 +1,36 @@
+AD5M - BOOTLOADER/SPL LOCATION - BLOCKED
+==============================================
+(See README.txt for the full index.)
+
+Tried to find where the actual first-stage bootloader (SPL/U-Boot, the
+thing that runs before the kernel and reads the "ota" pointer - see
+ab-slots.txt - then loads the uImage) physically lives:
+  - eMMC hardware boot partitions (mmcblk0boot0, mmcblk0boot1, 4MB each,
+    confirmed to exist in dmesg): both are entirely zeroed (dd + strings
+    on first 256KB of boot0 found nothing, boot1 header also all zero).
+    Not in use.
+  - /proc/mtd, /sys/class/mtd, /dev/mtd*: none exist. No SPI-NOR/NAND
+    flash device is exposed to the running Linux kernel at all.
+  - lsmod: no spi/flash/nand/nor/mtd driver module loaded.
+  - fw_printenv (standard U-Boot userspace env tool): not installed.
+  - dmesg: no SPL/bootloader/flash console output at all - the visible
+    kernel ring buffer starts right at MIPS timer/clock init, no earlier
+    boot-stage messages captured.
+  - The GPT itself (protective MBR + header + partition entries) looks
+    clean and standard, occupying LBA 0-33 as expected - no obvious
+    room for an embedded bootloader stashed in that space.
+  - Searched the whole filesystem for any U-Boot environment/boot
+    script file (uEnv.txt, boot.scr, extlinux.conf, *.env) that might
+    reveal boot-chain config even without raw flash access - none exist
+    anywhere.
+
+CONCLUSION: wherever the real first-stage bootloader lives, it is NOT
+visible to or accessible from the running Linux OS over SSH - most
+likely a discrete SPI-NOR/NAND flash chip on the board that the running
+kernel simply has no driver/exposure for (common - the boot flash is
+often only touched by the bootloader itself, deliberately left out of
+the production Linux kernel). Going further on this specific question
+(exact bootloader chip/format/offset) would need physical inspection
+(board photos/chip markings) or a hardware programmer, not achievable
+via SSH alone. GENUINELY BLOCKED - not a matter of trying harder over
+SSH, a fundamentally different access method is needed.

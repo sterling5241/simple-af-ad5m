@@ -1,0 +1,1 @@
+0e7a275d4aaccbca478e97e04b0413c8  /usr/data/AD5X-factory.tar.xz

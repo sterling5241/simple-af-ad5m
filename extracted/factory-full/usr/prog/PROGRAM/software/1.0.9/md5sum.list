@@ -1,0 +1,8 @@
+abce4dd879e8cb80d372ff961711af06  ./start.sh
+4b7662702df42bba7d040d59caf34699  ./virtual_sdcard.py
+a2dec16517c342873abd5d60c8948b06  ./query_adc.py
+500299a5763e707fcf73f24abd520883  ./sys_start.sh
+f5d295cd3b5f7c3007d04c059163bc1f  ./firmwareExe
+8b4ff2e4068cc3dbc2dbf03fa249f1ba  ./printer.base.cfg
+599956233bfd8aef768fa81ec1afebfc  ./run.sh
+2991a2d8ee6e22271d872aefd738263b  ./app_startup.sh

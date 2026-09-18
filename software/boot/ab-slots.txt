@@ -1,0 +1,79 @@
+AD5M - A/B KERNEL+ROOTFS PARTITION SCHEME
+===============================================
+(See README.txt for the full index. See hardware.txt for the eMMC this
+lives on. See ota-system.txt for the software that reads/writes these
+partitions.)
+
+Real partition table (resolved via fdisk -l, GPT, 2026-09-18)
+----------------------------------------------------------------
+  1  kernel      8MB    (A slot)
+  2  rootfs      100MB  squashfs (A slot)
+  3  kernel2     8MB    (B slot)
+  4  rootfs2     100MB  squashfs (B slot) <- ACTIVE right now, confirmed
+                                              via /proc/cmdline:
+                                              "root=/dev/mmcblk0p4
+                                              rootfstype=squashfs ro"
+  5  ota         1MB    (OTA boot-target pointer, see below)
+  6  usershare   1GB    ext4, mounted at /usr/prog
+  7  userdata    5.8GB  ext4, mounted at /usr/data
+
+Genuine A/B dual-bank firmware scheme. This printer is currently booted
+from the B slot (kernel2/rootfs2).
+
+"ota" partition contents (p5, 1MB): read-only dd shows just a plain
+text marker, "ota:kernel2\n" then zero-padding. Not a data partition -
+a one-line pointer naming which kernel/rootfs slot the bootloader
+should boot next. See ota-system.txt for exactly how this string gets
+read/written by real code.
+
+Real image format of the A/B kernel+rootfs partitions
+---------------------------------------------------------
+Kernel partitions (p1 "kernel" / p3 "kernel2"): standard U-Boot legacy
+uImage format. Header magic 27 05 19 56 = the real, standard U-Boot
+IH_MAGIC (0x27051956) - not a custom/proprietary format. Embedded name
+string "Linux-5.10.186+" at the standard uImage name-field offset,
+matching the running kernel version exactly.
+
+Decoded uImage header fields (standard 64-byte U-Boot header layout):
+  magic:      0x27051956 (IH_MAGIC)
+  size:       0x0049d000 = 4,809,728 bytes (~4.59MB)
+  load addr:  0x80f00000
+  entry addr: 0x80f00000 (same as load)
+  os:         05 = IH_OS_LINUX
+  arch:       05 = IH_ARCH_MIPS
+  type:       02 = IH_TYPE_KERNEL
+  comp:       00 = IH_COMP_NONE (uncompressed)
+  name:       "Linux-5.10.186+"
+A real kernel image here could be rebuilt with standard `mkimage -A mips
+-O linux -T kernel -C none -a 0x80f00000 -e 0x80f00000 -n <name> -d
+<raw-kernel-binary> <output>` - nothing proprietary about the container
+format itself.
+
+Rootfs partitions (p2 "rootfs" / p4 "rootfs2"): standard SquashFS.
+Header magic 68 73 71 73 = "hsqs" = the real SquashFS superblock magic.
+Decoded squashfs superblock fields (v4.0 layout): inode_count=930,
+block_size=131072 (128KB), frag_count=63, compression=3 (LZO),
+block_log=17, version=4.0. Standard `mksquashfs ... -comp lzo -b 131072`
+would reproduce this container format.
+
+Full-partition md5sum comparison:
+  kernel (p1)  = kernel2 (p3)  : be7ee68d92879db90a085d7305cb0411 (IDENTICAL)
+  rootfs (p2)  = rootfs2 (p4)  : f684684a9809345df8d0ab6681e829c2 (IDENTICAL)
+Both A and B slots are byte-for-byte identical images on this printer -
+it has never actually received a differential OTA update since
+manufacture; both slots are untouched factory twins.
+
+What's actually inside the rootfs squashfs
+-----------------------------------------------
+Loop-mounted the inactive rootfs (p2) read-only (`mount -t squashfs -o
+ro /dev/mmcblk0p2 /tmp/rootfs_a`, then unmounted cleanly) to see what's
+actually inside the base image vs. what's assembled at runtime:
+  bin dev etc lib lib32(symlink) linuxrc(symlink->bin/busybox) media mnt
+  module_driver opt proc root run sbin sys tmp usr var
+Genuinely minimal Buildroot skeleton (~930 inodes) - confirmed by
+comparing against the live running /: squashfs's own /opt and /root are
+empty placeholders, while the live system's are real, populated,
+actively-mounted content. The entire real application stack (FlashForge
+app, Zmod, Klipper, Moonraker, all config/data) lives OUTSIDE the A/B
+kernel/rootfs slots entirely, on the separate persistent ext4 partitions
+(usershare p6, userdata p7), untouched by whichever slot boots.

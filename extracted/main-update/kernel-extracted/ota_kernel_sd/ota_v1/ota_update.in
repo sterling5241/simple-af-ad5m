@@ -1,0 +1,8 @@
+ota_version=1
+
+img_type=kernel
+img_name=xImage
+img_size=4857920
+img_md5=84b161f2c4e3c66a614e5a621d363a30
+
+
