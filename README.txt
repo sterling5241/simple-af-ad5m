@@ -29,10 +29,21 @@ software/boot/  - the Linux host system: SoC, OS, rooting, A/B update
                        blocked, needs physical hardware access
 
 software/boards/  - the 4 known MCU sub-boards, one folder each
-  main/chip.txt   - mainboard MCU: Nations N32G45x, NationsCommand tool,
-                    the real outage + safe recovery pattern found
+  main/chip.txt   - mainboard MCU: Nations N32G455 (512 KiB flash, decoded
+                    from DBGMCU_IDCODE), NationsCommand tool, the real
+                    outage + safe recovery pattern found
   eboard/chip.txt - toolhead MCU: real klipper3d/canboot bootloader,
-                    IAPCommand tool, the second outage
+                    IAPCommand tool, the second outage; chip ID via the
+                    safe dump_mcu.py method (N32G455, 256 KiB inferred)
+  boot-entry-and-gpio.txt - how the MCUs enter/leave bootloader mode:
+                    NationsCommand's two host GPIOs (49 reset pulse, 50
+                    BOOT0) decoded by disassembly, the Nations manual's
+                    BOOT0/DBG_ID sections, why the mainboard outage
+                    happened, the CORRECTION that IAPCommand never touches
+                    a GPIO, and the eboard's serial bootloader request
+  prior-art.txt   - third-party MCU findings from a web search (g992's AD5M
+                    research repo/issues, Klipper forum) - a DIFFERENT
+                    board revision (Allwinner host), read the caveats
   ifs/chip.txt    - a 4th board, fully resolved via safe offline
                     binary analysis + read-only live inspection: a
                     real 4-channel filament feed/switch system
@@ -40,6 +51,16 @@ software/boards/  - the 4 known MCU sub-boards, one folder each
                     real Klipper extra (zmod_ifs.py) - inactive on
                     this specific printer's config, never queried
                     live, no outage on this one
+
+references/  - third-party source material saved locally (not printer
+               files): Nations' N32G45x user manual (816 pp) and BOOT-
+               interface guide (PDF + text), g992's AD5M printer.base.cfg
+               and repo file list, xblax's Klipper-mod MCU scripts.
+               Summarised in software/boards/prior-art.txt and
+               software/boards/boot-entry-and-gpio.txt.
+
+firmware-recon/analysis/  - the capstone/pyelftools scripts used to
+               disassemble NationsCommand/IAPCommand (see its README.txt)
 
 software/klipper/  - the Klipper/Moonraker application layer
   pins.txt        - complete real GPIO/pin mapping, both MCUs

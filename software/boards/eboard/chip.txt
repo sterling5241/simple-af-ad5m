@@ -100,7 +100,22 @@ unfamiliar vendor tool - "just checking usage" turned out not to be
 side-effect-free. Worth asking about the specific command, not just
 the general goal, before running anything against a live MCU port.
 
-Root cause, found on deeper inspection (shared with the mainboard
+CORRECTION (2026-09-18, later - read this first): disassembling
+IAPCommand (boot-entry-and-gpio.txt, section 4) shows its GPIO functions
+(stm32Reboot -> GPIO 34 low pulse, stm32UpdateFLag / stm32Unexport ->
+GPIO 35) are NEVER CALLED: no direct caller exists anywhere in the binary,
+and main only does serialOpen(8E1) -> stm32Sync -> [flash] -> stm32Close.
+So the paragraphs below - which say this outage had the same "reset GPIO
+left asserted" root cause as the mainboard's - are NOT supported for the
+eboard and are kept only for history. What the zero-arg run really did was
+re-configure /dev/ttyS5 and write ISP sync bytes into the running
+firmware's line. Why the eboard then stayed lost until a power cycle is
+UNEXPLAINED. The known eboard bootloader entry is a software request
+string (" \x1c Request Serial Bootloader!! ~") sent over the serial link,
+per xblax's scripts - see boot-entry-and-gpio.txt section 5.
+
+Root cause, found on deeper inspection (SUPERSEDED, see correction above;
+originally shared with the mainboard
 incident - see ../main/chip.txt): full string-dumped IAPCommand (all
 342 strings) and found it statically links an IDENTICAL Gpio.cpp/
 gpio.c module to NationsCommand (`gpio_export`, `gpio_unexport`,
@@ -190,8 +205,32 @@ same Nations N32G45x family, but that decode is HYPOTHESIS only - not
 checked against a Nations datasheet.
 CONCLUSION: eboard is very probably a Nations N32G45x-family chip like
 the mainboard - upgraded from "circumstantial guess" to "fairly
-strong evidence". Still NOT resolved: the exact part (N32G452 vs
-N32G455 etc.) - it would need further reads (flash-size/device-ID
-registers, e.g. DBGMCU_IDCODE at 0xE0042000 - an unmapped read on a
-Cortex-M can fault the MCU and trigger a watchdog reset, so it needs
-separate approval) or physical chip markings.
+strong evidence" - and see the DBG_ID decode just below, which now
+names the part.
+
+DBGMCU_IDCODE follow-up: the same 0xE0042000 read was run on the
+MAINBOARD only (see ../main/chip.txt): it returned 0x8F584511, no fault,
+and is identical to the last word of that board's UID block
+(0x1FFFF7FC). The eboard's own UID-block tail word is "11 45 54 8f" =
+0x8F544511. By analogy that is probably ITS debug ID (same 0x511 low
+12 bits, different upper half 0x8F54 vs 0x8F58) - but this is inferred
+from the mainboard's mirror behavior, NOT read live from 0xE0042000 on
+the eboard. What the different upper half means (silicon revision vs
+sub-variant) was unknown at the time of that read.
+
+DECODED (web search, same day): using the N32G45x DBG_ID layout from the
+OpenOCD driver patch (full quote and source URL in ../main/chip.txt),
+computed in Python:
+  mainboard 0x8F584511 -> dev_id 0x455 (N32G455), flash 512 KiB, SRAM 144 KiB
+  eboard    0x8F544511 -> dev_id 0x455 (N32G455), flash 256 KiB, SRAM 144 KiB
+So the differing upper half is the FLASH SIZE field: [19:16] = 8 vs 4,
+in 64 KiB units. Both boards are N32G455 (not N32G452); the eboard is a
+256 KiB-flash part. This also explains the earlier complement-checked
+0x0002 vs 0x0001 field at 0x1FFFF7E8 - the same 512 vs 256 (in 256 KiB
+units), an independent second indicator that agrees, which upgrades my
+earlier "flash-size class code" hypothesis to well-supported. The
+"pin mask" reading of the other differing bytes remains hypothesis only.
+CAVEAT: the eboard figure rests on its UID-block tail word mirroring
+DBG_ID (true on the mainboard, verified) - the eboard's 0xE0042000 was
+NOT read live. Also the layout is from the OpenOCD patch, not the
+Nations manual itself.

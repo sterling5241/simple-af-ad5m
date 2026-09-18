@@ -62,8 +62,10 @@ from scratch. (Creality's own K1/Ender3V3 family runs a totally
 different chip, GD32F303 from GigaDevice - no existing preset to copy,
 but the Kconfig plumbing for THIS chip already exists upstream.)
 
-Exact variant (N32G452 vs N32G455) - attempted, got real chip data,
-not fully resolved
+Exact variant (N32G452 vs N32G455) - RESOLVED as N32G455 (see the
+"DECODED" bullet in the DBGMCU_IDCODE section below; the history of the
+attempts that led there follows). Third-party reports on these chips:
+../prior-art.txt.
 ------------------------------------------------------------------------
 Pulled the real flash tool binaries locally
 (/usr/prog/PROGRAM/control/1.1.1/NationsCommand, via pscp -scp).
@@ -157,7 +159,63 @@ get this data - the same values, with no GPIO/bootloader involvement.
 Compared with the eboard's dump (../eboard/chip.txt), the 0x1FFFF7E0
 block has the same structure with different values - see there.
 
-Root cause of the outage, found on deeper inspection (applies to BOTH
+DBGMCU_IDCODE read (2026-09-18, user-approved via /permissions, mainboard
+only): dump_mcu.py -s 0xE0042000 -l 0x4 /dev/ttyS2 returned bytes
+  11 45 58 8f   => little-endian word 0x8F584511
+No fault, no watchdog reset - the MCU answered normally and Klipper
+came back cleanly afterward. Observations (facts, then hedged reading):
+- This is byte-for-byte the SAME word that sits at the very end of the
+  UID block (0x1FFFF7FC = "11 45 58 8f" in the dump above), so on this
+  chip that address mirrors the debug ID register.
+- Low 12 bits = 0x511. Genuine ST F103 parts report 0x410 (medium),
+  0x414 (high-density), 0x430 (XL) there - 0x511 is not an ST F103
+  value, which independently confirms this is not genuine ST silicon.
+- DECODED (web search, same day - the earlier "no datasheet available"
+  was only true of the printer; I had not searched the web). An OpenOCD
+  flash-driver patch for Nations N32G45x (openocd-devel mailing list,
+  http://www.mail-archive.com/openocd-devel@lists.sourceforge.net/msg18389.html)
+  reads this exact register, N32G45X_DBG_ID = 0xE0042000, and cites
+  "N32G45x Series User Manual (EN_UM_N32G45x), sections 3.2 and 29.4.2".
+  Its layout (quoted verbatim from the patch, fetched twice):
+    [31:28] SRAM size in 16 KiB units, minus one
+    [23:20] DEV_NUM_L      [19:16] FLASH size in 64 KiB units
+    [15:12] DEV_NUM_H      [11:8]  DEV_NUM_M
+    [7:4]   REV_NUM_H      [3:0]   REV_NUM_L
+    dev_id = ((dbg_id >> 4) & 0xff0) | ((dbg_id >> 20) & 0xf)
+    0x452 = N32G452, 0x455 = N32G455, 0x457 = N32G457
+  Applied to 0x8F584511 (computed in Python, not by hand):
+    dev_id = 0x455  =>  N32G455
+    flash  = 0x8 * 64 KiB = 512 KiB
+    SRAM   = (0x8 + 1) * 16 KiB = 144 KiB
+  Nations' own N32G455 product page independently lists "up to 512KByte
+  Flash" and "up to 144KByte SRAM" and Cortex-M4+FPU at 144MHz, matching
+  (the N32G452 page lists the same maxima, so it is the dev_id, not the
+  sizes, that separates 455 from 452).
+  Later the same day the layout was CONFIRMED against the Nations user
+  manual itself (section 29.4.2: model 0x455 = N32G455, flash = FLASH[3:0]
+  x 64 KB, SRAM = (SRAM[3:0]+1) x 16 KB) - see boot-entry-and-gpio.txt
+  section 1. (Originally this came only from the OpenOCD patch.) Klipper's own pull request #7363
+  (github.com/Klipper3d/klipper/pull/7363) also confirms the UID is at
+  0x1FFFF7F0, matching this document. Klipper already has MACH_N32G455.
+- 0xE0042000 is a Cortex-M debug-block address; reading it over
+  debug_read was the risk noted in earlier entries and did not
+  materialize on this chip. Not repeated on the eboard - see
+  ../eboard/chip.txt for what its UID-block tail word implies.
+
+CORRECTION (2026-09-18, later - read this first): disassembling the tool
+(boot-entry-and-gpio.txt, sections 2-3) pins the two GPIOs down: sysfs
+GPIO 49 is pulsed low ~200 ms (a reset pulse) and GPIO 50 is driven high
+on connect / low on disconnect. With the Nations manual (BOOT0=1 at reset
+selects the ROM bootloader) the better explanation of the outage is:
+bare `-c` reboots the chip INTO its ROM bootloader and never resets it back
+out, so it stays there until a power cycle; `-c -r` does the reset. That
+supersedes the "GPIO left asserted holding the chip in reset" wording and
+the "exact GPIO number is not discoverable" statement in the paragraph
+below, which is kept for history. It also no longer applies to the eboard
+(IAPCommand's GPIO code is never called - see ../eboard/chip.txt).
+
+Root cause of the outage, found on deeper inspection (SUPERSEDED - see the
+correction above; originally claimed to apply to BOTH
 this board and the eboard - see ../eboard/chip.txt for the matching
 second incident): NationsCommand statically links a real Gpio.cpp
 module (`gpio_export`, `gpio_unexport`, `gpio_out`, `gpio_set_direction`,

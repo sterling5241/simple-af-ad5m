@@ -35,10 +35,27 @@ Firmware/hardware layer (see software/boot/ and software/boards/)
     between the boards (main 0x0002 vs eboard 0x0001 in a complement-
     checked field) - hint of a different/smaller variant on the eboard,
     hypothesis only. Exact N32G452/N32G455 for either board still not
-    determined; the only remaining register read is DBGMCU_IDCODE at
-    0xE0042000 (can fault the MCU -> watchdog reset; NOT run, needs its
-    own explicit approval). See software/boards/main/chip.txt and
-    software/boards/eboard/chip.txt.
+    determined. UPDATE 3: DBGMCU_IDCODE (0xE0042000) WAS then read on
+    the mainboard (user-approved): 0x8F584511, no fault, Klipper
+    restored. Low 12 bits 0x511 is not an ST F103 ID, and the word is
+    identical to the tail of the UID block (0x1FFFF7FC), so the eboard's
+    likely ID is 0x8F544511 (inferred, not read live).
+    UPDATE 4 - RESOLVED via web search: the OpenOCD N32G45x driver patch
+    documents the DBG_ID layout. Decoded: BOTH boards are N32G455
+    (dev_id 0x455). Mainboard = 512 KiB flash / 144 KiB SRAM (read
+    live); eboard = 256 KiB flash / 144 KiB SRAM (inferred from its
+    UID-block tail word, not read live). The layout was later CONFIRMED
+    against the Nations user manual itself (section 29.4.2; device model
+    0x455 = N32G455) - see software/boards/boot-entry-and-gpio.txt. Only
+    the eboard's flash size remains inferred, not read live.
+    The g992/flashforge-ad5m-5mpro-research repo
+    and its issue #8 ("Building and flashing klipper to N32G455") were
+    then read: the author bricked MCUs trying self-built N32G455 Klipper
+    images (J-Link, 0x08000000), no reply reports a working one, and
+    the thread's Klipper v0.12.0 Kconfig defaults (128 KiB flash, 64 KiB
+    RAM, 128 MHz) were called the smallest variant. That repo covers the
+    older Allwinner-host AD5M/5M Pro, a different board revision. See
+    software/boards/prior-art.txt, main/chip.txt and eboard/chip.txt.
 [~] UPDATE (later, supersedes the wording below): eboard chip
     identified as very probably a Nations N32G45x-family clone via a
     SAFE method - Klipper's stock dump_mcu.py (read-only debug_read),
@@ -175,6 +192,31 @@ Real factory packages (user-provided, see software/factory-packages/)
     file, nothing separate). c_helper.so is confirmed as Klipper's own
     compiled chelper library (real stepcompress/itersolve/trapq
     symbols), not MCU firmware.
+
+[ ] Read-only backup of the MCUs' running flash images (both boards)
+    via the same dump_mcu.py debug_read path (e.g. 0x08000000 onward,
+    512 KiB mainboard / 256 KiB eboard by the DBG_ID decode). The
+    Nations BOOT protocol has no flash-read command (references/
+    Nations-N32G45x-BOOT-interface-guide.pdf), so this is the only read
+    route found. NOT tried: it needs Klipper stopped (like the ID reads)
+    and it is unknown whether read protection (option bytes) blocks it -
+    a small test read would show. Compare with firmware-recon/*.bin.
+[~] How the host puts an MCU into the ROM BOOT - ANSWERED for the
+    mainboard by offline disassembly + the Nations user manual (now
+    obtained): NationsCommand raises host GPIO 50 (BOOT0 by my reading),
+    pulses GPIO 49 low ~200 ms (NRST), so the chip re-latches BOOT0 and
+    starts the ROM bootloader; bare `-c` never resets it back out, which
+    explains the mainboard outage. What is still not proven: that 49/50
+    really are NRST/BOOT0 (schematic needed) and nothing was observed
+    live. See software/boards/boot-entry-and-gpio.txt.
+[~] CORRECTION to earlier notes: IAPCommand (eboard) never calls its GPIO
+    functions (GPIO 34/35 code is unreachable), so the "reset GPIO left
+    asserted" explanation does NOT cover the eboard outage. Why the eboard
+    stayed lost after the zero-arg IAPCommand run is unexplained. The eboard
+    is normally sent into its bootloader by a serial request string
+    (xblax's scripts, older AD5M). Open lead: whether this printer's stock
+    software does an eboard start handshake like xblax's boot_eboard_mcu
+    (no stock script found; would be inside a binary).
 
 Decisions not yet made (need direction, not just more recon)
 --------------------------------------------------------------------

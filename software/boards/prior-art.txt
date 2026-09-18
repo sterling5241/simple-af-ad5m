@@ -1,0 +1,162 @@
+AD5M - MCU PRIOR ART (what other people have found/tried on these chips)
+==========================================================================
+(See README.txt for the full index. Chip facts from THIS printer are in
+main/chip.txt and eboard/chip.txt; this file is only third-party material
+found by web search on 2026-09-18, with what I did and did not verify.)
+
+IMPORTANT - different hardware revision
+------------------------------------------
+The sources below are about the older AD5M / 5M Pro, whose host CPU is an
+ALLWINNER part (their guide's step 1 is "Disabling Allwinner CPU").
+This printer's host is an Ingenic X2600 (MACHINE=AD5X - see
+../boot/hardware.txt). The MCU side looks the same class (Nations N32G455,
+Klipper build MCU=stm32f103xe), but board-level notes (resistor
+references etc.) were NOT checked against this board.
+
+Source 1: github.com/g992/flashforge-ad5m-5mpro-research
+-------------------------------------------------------------
+Files: README.md, photo/ (PCB scans/photos, 5M vs 5M Pro differences),
+software/ (klipper.zip, printer.base.cfg, Adventurer5M.json, screenshot),
+upgrades/ (getting_root.md, klipper_on_ext_cpu.md, silent_psu.md).
+Read in full: README, photo/readme.md, software/readme.md,
+upgrades/getting_root.md, upgrades/klipper_on_ext_cpu.md,
+software/printer.cfg. NOT read: printer.base.cfg, klipper.zip (21 MB),
+Adventurer5M.json, the photos, silent_psu.md.
+- upgrades/klipper_on_ext_cpu.md: describes disabling the host CPU
+  (pull one side of a resistor to GND), unsoldering two resistors next
+  to the mainboard MCU and wiring RX/TX/GND to an external host UART, and
+  the same for the eboard through its RS232 transceiver, so an external
+  Klipper host drives both MCUs. Author's own warnings: warranty loss,
+  "I destroyed some parts on the motherboard and eboard", "I burned the
+  converter chip". CAN/USB alternatives are listed as UNTESTED.
+- upgrades/getting_root.md: root by editing flashforge_init.sh in the
+  update package and installing it from USB (same unauthenticated USB
+  update path documented here in ../boot/rooting.txt).
+
+Source 2: issue #8 in that repo - "Building and flashing klipper to
+N32G455" (closed, 9 comments, Feb 2024). Read in full via the GitHub API.
+What people reported (all second-hand claims, none reproduced by me):
+- Opening post (g992): built and flashed a .bin to N32G455, "I bricked
+  mcus", asked for anyone who succeeded.
+- xblax: the stock MCU firmware is Klipper compiled for stm32f103xe and
+  installed on the N32G455 (visible in Mainsail's MCU version). This
+  matches this printer's live handshake (MCU=stm32f103xe, 144 MHz).
+- g992: compiling for plain stm32f103 gives no usable analog inputs / the
+  chip errors when reading the sensor; compiling with newer Klipper
+  (0.12) N32G45x support "mcu just can't boot". Flashed with a Segger
+  J-Link from 0x08000000: "nothing worked". Also said they replaced the
+  toolhead's Nations chip with a real STM32F103 and built Klipper for it.
+  Said the printer runs fine with the prebuilt (Klipper 0.11-era)
+  firmware, so they stopped there.
+- jlodew0: quoted Klipper v0.12.0 src/stm32/Kconfig defaults for
+  MACH_N32G45x - CLOCK_FREQ 128000000 (64000000 with internal ref),
+  FLASH_SIZE 0x20000 (128 KiB), RAM_SIZE 0x10000 (64 KiB) - and
+  commented these look like the smallest variant; also said the part on
+  the board reads "REL7" with "E = 512K" (i.e. N32G455REL7; the comment
+  doesn't say which board or printer). Did not report a working build.
+- No reply in the thread reports a working self-built N32G455 image.
+CROSS-CHECK against this printer: the "512K" claim agrees with my
+DBG_ID decode of the MAINBOARD (512 KiB, ../boards/main/chip.txt); the
+eboard decodes to 256 KiB (inferred), so it is a smaller part than the
+one that comment describes. The Kconfig defaults quoted above are from
+Klipper v0.12.0 - I did NOT check whether current Klipper master still
+uses them (PRs #7005 and #7363 have since touched N32G45x; only their
+titles/summaries were read).
+
+Source 3: klipper.discourse.group/t/nations-mcu-support-flashing/13893
+(G992, Feb 2024). One post only, no replies, auto-closed. Says: same
+Klipper settings as for the STM chip, flashed with a J-Link from
+0x08000000 - works on an STM pin-compatible chip, "the N32 doesn't seem
+to start executing the program". No resolution.
+(WebFetch got HTTP 403 for this page; read through the site's public
+.json endpoint instead.)
+
+Source 4: g992's software/printer.base.cfg vs THIS printer's factory
+printer.base.cfg+printer.cfg (extracted/factory-full/usr/data/config/).
+Compared every *pin*/serial key by (section, key) in Python; local copy
+of theirs is references/g992-AD5M-printer.base.cfg.
+- EBOARD pins are the SAME: extruder step/dir/enable/heater/sensor/TMC
+  uart (eboard:PB14, !PB15, !PB12, PA8, PA0, PB10), stepper_x endstop
+  (!eboard:PA15), heat_fan (eboard:PB4) - 8 identical eboard keys, plus
+  one mainboard key, heater_bed heater_pin PB9 (9 identical in total).
+- MAINBOARD pins are DIFFERENT almost everywhere: all X/Y/Z step, dir,
+  enable, TMC uart pins, Y/Z endstops, probe (!PB3 vs !PB4), bed sensor
+  (PA0 vs PC3), LED, pcb fan differ (20 keys differ; PB9 is the only
+  identical mainboard pin found). Host serial ports also
+  differ (this printer: mcu=/dev/ttyS2, eboard=/dev/ttyS5; theirs:
+  mcu=/dev/ttyS5, eboard=/dev/ttyS1). Accelerometer: lis2dw here vs
+  adxl345 there.
+- So the older AD5M's eboard is wired like this one, its mainboard is a
+  different design. Consistent with the different-hardware-revision
+  warning above; their mainboard-side notes should not be applied here.
+  (Ours was read from the pristine factory copy, which earlier work
+  showed matches the live printer's pin mapping.)
+
+Source 5: Nations "N32G45x&N32G4FR&N32WB452 Series BOOT interface
+instruction user guide", V1.2 (33 pages, 2023-07-25; the copy at
+nationstech.com/uploads/Microcontrollers/N32G452xx_V3.4.0/8-User_Guide/).
+Saved locally as references/Nations-N32G45x-BOOT-interface-guide.pdf and
+.txt (private research copy - the guide's notice forbids redistribution).
+Read the whole command set, the upper-computer flow and the precautions.
+This is the ROM/system-memory bootloader that NationsCommand talks to.
+- Interfaces: USART1 (PA9 TX / PA10 RX) and USB DFU (PA11 DM / PA12 DP)
+  on N32G452/5/7. Serial frame: AA 55 + {CMD_H, CMD_L, LEN(2), Par(4),
+  DAT} + XOR. Success status A0 00, failure B0 xx.
+- Baud: V2.1 = auto-detect (host sends 0x7F after power-on); V2.2 and up
+  = negotiation, starts at 9600 then CMD_SET_BR. NationsCommand's "Connect
+  the device at baudrate 9600" (main/chip.txt) matches that.
+- Command set: SET_BR 0x01, GET_INF 0x10, KEY_RNG 0x20, KEY_UPDATE 0x21,
+  FLASH_ERASE 0x30, FLASH_DWNLD 0x31, DATA_CRC_CHECK 0x32, OPT_RW 0x40
+  (option bytes: read-protection level, write protection, DATA0/1, USER),
+  USERX_OP 0x41, SYS_RESET 0x50, APP_GO 0x51 (jump to user area).
+  There is NO flash READ command - only CRC check - so the BOOT cannot
+  be used to dump the chip's flash.
+- CMD_GET_INF reply (51 data bytes): DAT[0] chip model index, DAT[1]
+  command-set version (BCD), DAT[2] BOOT code version, DAT[3..18] 16-byte
+  UCID, DAT[19..30] 12-byte UID, DAT[31..34] 4-byte DBGMCU_IDCODE,
+  rest reserved. This is exactly what NationsCommand printed as "UCID"
+  and "UID" - and it confirms those are the 16- and 12-byte blocks I
+  read at 0x1FFFF7C0 / 0x1FFFF7F0, and that the bootloader also returns
+  DBGMCU_IDCODE (NationsCommand did not print it).
+- Features: flash partitions (USER1/2/3) with per-partition key
+  authentication, encrypted download (AES-128 ECB), key update, read-
+  protection via option bytes. Chip integrity check: if BOOT's own
+  verification fails it loops forever.
+- Versions: V2.5 is the newest described (UART RX pull-up, RTC/backup-
+  domain handling). NationsCommand printed "BOOT Command Version:V:22"
+  and "BOOT SubVersion:V25"; my reading is DAT[1]=0x22 and DAT[2]=0x25 =
+  BOOT V2.5 in system memory - an interpretation of the tool's labels,
+  not confirmed.
+- NOT in this guide (searched for BOOT0/pin/enter): how the chip is
+  told to start the system-memory BOOT. That IS in the full user manual
+  (Source 6): BOOT0=1 / BOOT1=0 at reset selects System Memory. Combined
+  with NationsCommand's disassembly (GPIO 50 raised before a GPIO 49 reset
+  pulse) it explains the mainboard outage - see boot-entry-and-gpio.txt.
+
+Source 6: Nations N32G45x user manual (816 pages) - read for boot pins,
+DBG_ID, UID/UCID and read protection. Summarised, with what the tables
+say and where the text extraction is garbled, in boot-entry-and-gpio.txt
+section 1. Saved as references/Nations-N32G45x-User-Manual-EN_UM.pdf.
+
+Source 7: github.com/xblax/flashforge_adm5_klipper_mod (older AD5M).
+Files fetched into references/xblax-klipper-mod/: README.md,
+S54mcu_update, S55mcu_boot, mcu_update.sh, boot_eboard_mcu (compiled ARM
+binary - only its strings were read). The other ~170 files (buildroot
+config, screens, overlays) were only listed. What they show about MCU
+boot and flashing is in boot-entry-and-gpio.txt section 5.
+The stock MCU firmware file names it references for the older AD5M are
+Mainboard-20230831.bin and Eboard-20231012.hex (control 2.2.3); this
+printer's are AD5X.bin and ADM_App.hex (control 1.1.1).
+
+Not read: Stone-Time/Flashforge-Adventure-5M-Pro-Klipper-SSH (the API
+answered HTTP 200 but its file tree was not fetched), mstraciak/
+flashforge-ad5m-mods (tree listed: 108 files, almost all 3D-Chameleon
+STLs, gcode and Arduino firmware - not relevant to the MCUs), the
+contents of g992's klipper.zip.
+
+Klipper PR #6116 (initial N32G45x support, WebFetch summary only): adds
+N32G452/N32G455, "mostly compatible with STM32F103 but have M4 core and
+different ADC" (custom ADC code from the N32G45x BSP), 144 MHz max with
+128 MHz noted as the safe speed without flash-latency changes, board
+config for the "Voxelab Aquila FFP0173 1.0.1", "first printer shipped with
+this MCU". It does not state a bootloader offset or flashing method.

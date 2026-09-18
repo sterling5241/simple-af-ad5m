@@ -1,0 +1,220 @@
+{
+  "sha": "d6beeee8c21861fa107da8aeec8628f5a273d857",
+  "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/trees/d6beeee8c21861fa107da8aeec8628f5a273d857",
+  "tree": [
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "70156294b1d340d9c8eac011ec250b0ad957cd6d",
+      "size": 717,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/70156294b1d340d9c8eac011ec250b0ad957cd6d"
+    },
+    {
+      "path": "photo",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "eaf1dd909c89ce51eaba30527856f46618b3a614",
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/trees/eaf1dd909c89ce51eaba30527856f46618b3a614"
+    },
+    {
+      "path": "photo/AD5M PRO Pcb Scan.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "682b955130c78815180cec248ff4e9c012df2d60",
+      "size": 21858341,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/682b955130c78815180cec248ff4e9c012df2d60"
+    },
+    {
+      "path": "photo/PDIC_Connection.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1837a2297fdc4f33c249e6974d368429305fae83",
+      "size": 1884804,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/1837a2297fdc4f33c249e6974d368429305fae83"
+    },
+    {
+      "path": "photo/USB_HUB_Connection.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d75650f123e73d23bcb87d370b939d00735ed0db",
+      "size": 1678073,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/d75650f123e73d23bcb87d370b939d00735ed0db"
+    },
+    {
+      "path": "photo/_5m_bottom_left_view.jpg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d9d507c1c3d2588325abd8e22fec748eb9eecb48",
+      "size": 2407921,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/d9d507c1c3d2588325abd8e22fec748eb9eecb48"
+    },
+    {
+      "path": "photo/_5m_bottom_right_view.jpg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fcaec2e585c69e4376165e7f325e608df3b2b462",
+      "size": 2429003,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/fcaec2e585c69e4376165e7f325e608df3b2b462"
+    },
+    {
+      "path": "photo/_5m_full_view.jpg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9e96f34160a3fd7afc58eda3408483b88bfcbfc4",
+      "size": 2669496,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/9e96f34160a3fd7afc58eda3408483b88bfcbfc4"
+    },
+    {
+      "path": "photo/_5m_full_view_marked.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4380d445282560616930995ac0f80d56c4e287cc",
+      "size": 14059400,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/4380d445282560616930995ac0f80d56c4e287cc"
+    },
+    {
+      "path": "photo/_5m_pro_bottom_view.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f373c1eeac5c8c675eb0459027ffc46f73534591",
+      "size": 120538,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/f373c1eeac5c8c675eb0459027ffc46f73534591"
+    },
+    {
+      "path": "photo/_5m_pro_full_view.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "912c00dc261e234ceacd7c8c7e53e6d06f112d6b",
+      "size": 262820,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/912c00dc261e234ceacd7c8c7e53e6d06f112d6b"
+    },
+    {
+      "path": "photo/_5m_pro_top_view.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "da43e594972c78c139eaae4577eb524bf1cbed60",
+      "size": 720439,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/da43e594972c78c139eaae4577eb524bf1cbed60"
+    },
+    {
+      "path": "photo/_5m_top_left_view.jpg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c0c0ed556aab3f31c80300a60c9b60dea48eb6d2",
+      "size": 2513586,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/c0c0ed556aab3f31c80300a60c9b60dea48eb6d2"
+    },
+    {
+      "path": "photo/_5m_top_right_view.jpg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "46d1807d2f22a58e8ce486c36d4982d843a2ba4a",
+      "size": 2569451,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/46d1807d2f22a58e8ce486c36d4982d843a2ba4a"
+    },
+    {
+      "path": "photo/external-cpu-concept-proof.gif",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ecf25a0b7a4095d9cf67b11400dd2a5f24ef8c50",
+      "size": 21305583,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/ecf25a0b7a4095d9cf67b11400dd2a5f24ef8c50"
+    },
+    {
+      "path": "photo/readme.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c9610a837805991490b261bfc2abd6db72147aec",
+      "size": 972,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/c9610a837805991490b261bfc2abd6db72147aec"
+    },
+    {
+      "path": "software",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "4d036f8c9c97aca337657bf273f986c64e18f4e4",
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/trees/4d036f8c9c97aca337657bf273f986c64e18f4e4"
+    },
+    {
+      "path": "software/Adventurer5M.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0130381f1c119eee5131d45e5624e88077c651ed",
+      "size": 2730,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/0130381f1c119eee5131d45e5624e88077c651ed"
+    },
+    {
+      "path": "software/klipper.zip",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a6b6b7e181522453fdd798bbda264ad39f7dd7ca",
+      "size": 21128266,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/a6b6b7e181522453fdd798bbda264ad39f7dd7ca"
+    },
+    {
+      "path": "software/klipper_errors.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d66935667560bc1a1357840a28259577091d17e1",
+      "size": 182053,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/d66935667560bc1a1357840a28259577091d17e1"
+    },
+    {
+      "path": "software/printer.base.cfg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2cbfd01c38451dcce92e6fd8a4aae7a75796ea29",
+      "size": 5099,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/2cbfd01c38451dcce92e6fd8a4aae7a75796ea29"
+    },
+    {
+      "path": "software/printer.cfg",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "566e8dc167721a7ac6a9e3c0babc49a385192a29",
+      "size": 947,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/566e8dc167721a7ac6a9e3c0babc49a385192a29"
+    },
+    {
+      "path": "software/readme.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e2541eb1d7ea34355c75229e74bce81d0ef223ff",
+      "size": 420,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/e2541eb1d7ea34355c75229e74bce81d0ef223ff"
+    },
+    {
+      "path": "upgrades",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "03bcbb7d7cb1ca96a5f512cea4eaa8aed93aedea",
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/trees/03bcbb7d7cb1ca96a5f512cea4eaa8aed93aedea"
+    },
+    {
+      "path": "upgrades/getting_root.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "46ce208b2489912649350d8778fd8c1ff0a1e471",
+      "size": 1319,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/46ce208b2489912649350d8778fd8c1ff0a1e471"
+    },
+    {
+      "path": "upgrades/klipper_on_ext_cpu.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5a8ca47a66709454d216ce9dbcbddbbe1d6e11c3",
+      "size": 2680,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/5a8ca47a66709454d216ce9dbcbddbbe1d6e11c3"
+    },
+    {
+      "path": "upgrades/silent_psu.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ce10daa62294310f5d725dae25f1d202a96ee683",
+      "size": 1222,
+      "url": "https://api.github.com/repos/g992/flashforge-ad5m-5mpro-research/git/blobs/ce10daa62294310f5d725dae25f1d202a96ee683"
+    }
+  ],
+  "truncated": false
+}
