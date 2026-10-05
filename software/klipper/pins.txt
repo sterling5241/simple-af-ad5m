@@ -10,7 +10,8 @@ minor tuning-value drift, confirming this mapping is accurate and
 real, not self-consistent-but-wrong.
 
 Kinematics: corexy. Two MCUs in the config: unprefixed = mainboard
-(N32G45x), "eboard:" prefix = toolhead board (CanBoot bootloader chip).
+(N32G45x), "eboard:" prefix = toolhead board (app at 0x08010000 above a bootloader
+region - see ../boards/flash-layout.txt).
 
 Mainboard (N32G45x) pins
 ------------------------------
@@ -31,7 +32,7 @@ Mainboard (N32G45x) pins
          sclk eboard:PA5, mosi eboard:PA7, miso eboard:PA6) - so the
          accelerometer lives on the toolhead board, not the mainboard.
 
-Eboard (toolhead, CanBoot bootloader chip) pins
+Eboard (toolhead chip, app above a bootloader region) pins
 -----------------------------------------------------
   extruder: step eboard:PB14, dir !eboard:PB15, enable !eboard:PB12,
             gear_ratio 50:10, rotation_distance 21.9 (geared extruder)

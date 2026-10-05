@@ -20,8 +20,9 @@ software/ (klipper.zip, printer.base.cfg, Adventurer5M.json, screenshot),
 upgrades/ (getting_root.md, klipper_on_ext_cpu.md, silent_psu.md).
 Read in full: README, photo/readme.md, software/readme.md,
 upgrades/getting_root.md, upgrades/klipper_on_ext_cpu.md,
-software/printer.cfg. NOT read: printer.base.cfg, klipper.zip (21 MB),
-Adventurer5M.json, the photos, silent_psu.md.
+software/printer.cfg. Read later (Sources 4 and 8 below): printer.base.cfg
+and klipper.zip. Still NOT read: Adventurer5M.json, the photos,
+silent_psu.md.
 - upgrades/klipper_on_ext_cpu.md: describes disabling the host CPU
   (pull one side of a resistor to GND), unsoldering two resistors next
   to the mainboard MCU and wiring RX/TX/GND to an external host UART, and
@@ -160,3 +161,22 @@ different ADC" (custom ADC code from the N32G45x BSP), 144 MHz max with
 128 MHz noted as the safe speed without flash-latency changes, board
 config for the "Voxelab Aquila FFP0173 1.0.1", "first printer shipped with
 this MCU". It does not state a bootloader offset or flashing method.
+
+Source 8 (added later): the last two "not read" repos, now read
+- Stone-Time/Flashforge-Adventure-5M-Pro-Klipper-SSH (171 files; 128 are
+  bin/git-* copies). A USB-update SSH/Telnet enabler for the Adventurer 5M
+  PRO (its flashforge_init.sh checks `uname -m` = armv7l, MACHINE=
+  Adventurer5MPro, PID=0024 - an ARM board, unlike this printer's MIPS
+  host). Copies shadow/inittab/passwd/sshd_config, sets root's password to
+  "123456" per its German Readme, installs ssh/sshd/nginx/htop binaries,
+  and shows start/boot/end status images on /dev/fb0. Same unauthenticated
+  USB-autorun path already documented here (../boot/rooting.txt); nothing
+  about the MCUs. BOOTEX.LOG is just a Windows FAT32 check log.
+- g992/.../software/klipper.zip (21 MB, 2110 files, all under klipper/):
+  a Klipper source snapshot. Its src/stm32/Kconfig contains NO N32G45x
+  entries and there are no n32 files, so it predates N32G45x support (it
+  fits the "works with Klipper 0.11" remark in issue #8). The only
+  FlashForge item is the generic Creator Pro 2018 config. Nothing
+  AD5M-specific. Not useful for this printer's MCUs.
+- mstraciak/flashforge-ad5m-mods (108 files): 3D-Chameleon multi-material
+  STLs, gcode, and Arduino firmware - unrelated to the MCUs.

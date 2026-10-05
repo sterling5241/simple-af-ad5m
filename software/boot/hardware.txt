@@ -49,3 +49,16 @@ firmware internally calls this board "AD5X" regardless of the AD5M
 retail badge. The real, pristine factory package (see
 ../factory-packages/factory-reset.txt) confirms the exact same
 MACHINE=AD5X/PID=0026 strings independently.
+
+
+HOST HEARTBEAT: /usr/prog/sys_start.sh (added 2026-09-18)
+---------------------------------------------------------
+The stock boot script that runs as PID 1074 on the live printer is just an endless loop:
+    while true; do cmd_gpio set_func pc11 output0; sleep 1; cmd_gpio set_func pc11 output1; sleep 1; done
+i.e. it toggles SoC pin PC11 (Ingenic port C, pin 11) once a second, forever. Its purpose is NOT
+verified; a heartbeat/watchdog feed or similar is the obvious reading, but nothing here shows
+what reacts to it or what happens if it stops. Worth knowing before changing anything about the
+host boot flow. (firmwareExe 1.1.1 also shells out to `cmd_gpio set_func PB07 output0/output1`; PB07 is the
+Wi-Fi module's power pin - app_startup.sh loads 8821cu.ko with power_on=PB07. PC11 is also
+claimed by the gpio_regulator module as "GPIO-POWER0"; see rootfs-and-boot-chain.txt.) The stock GUI, firmwareExe, is what launches Klipper: a worker thread,
+pthreadCheckKlipperStart, runs `/usr/prog/klipper/start.sh &`.

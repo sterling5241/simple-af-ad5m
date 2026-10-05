@@ -46,8 +46,8 @@ Firmware/hardware layer (see software/boot/ and software/boards/)
     live); eboard = 256 KiB flash / 144 KiB SRAM (inferred from its
     UID-block tail word, not read live). The layout was later CONFIRMED
     against the Nations user manual itself (section 29.4.2; device model
-    0x455 = N32G455) - see software/boards/boot-entry-and-gpio.txt. Only
-    the eboard's flash size remains inferred, not read live.
+    0x455 = N32G455) - see software/boards/boot-entry-and-gpio.txt. The
+    eboard's flash size was later read live too (0x8F544511, 256 KiB).
     The g992/flashforge-ad5m-5mpro-research repo
     and its issue #8 ("Building and flashing klipper to N32G455") were
     then read: the author bricked MCUs trying self-built N32G455 Klipper
@@ -145,7 +145,9 @@ Real factory packages (user-provided, see software/factory-packages/)
     script is capable of running, not something actually observed
     happening in this real package - see that file for the corrected
     wording.
-[x] Confirmed a real, previously-undocumented fact: Zmod's MCU firmware
+[x] (CORRECTED 2026-09-18 - see the live flash readback below: the boards
+    actually run the STOCK images; only the Zmod-bundled FILES differ.)
+    Confirmed a real, previously-undocumented fact: Zmod's MCU firmware
     on BOTH boards is NOT byte-identical to the genuine stock factory
     firmware (different checksums/sizes for both Mainboard.bin/AD5X.bin
     and Eboard.hex/ADM_App.hex). Zmod ships its own rebuilt MCU
@@ -193,6 +195,36 @@ Real factory packages (user-provided, see software/factory-packages/)
     compiled chelper library (real stepcompress/itersolve/trapq
     symbols), not MCU firmware.
 
+[x] EBOARD BOOTLOADER FULLY DISASSEMBLED (software/boards/eboard/
+    bootloader.txt): XMODEM-CRC-like protocol; idles printing "Ready." after
+    a cold boot until it gets 0x41 ('A'); an app-initiated reset sets magic
+    0x1234 in backup register 4 so it chains back to the app; a bare 'C'
+    (0x43) makes it erase 160 KiB of app flash. Host half of the handshake
+    exists as the stock /usr/prog/klipper/checkEboard tool. Consistent with
+    IAPCommand's sync/write code and xblax's boot_eboard_mcu. Sharpens
+    (does not confirm) the eboard-outage hypothesis.
+[x] What sends the eboard start byte at boot - FOUND: the stock GUI itself.
+    firmwareExe's main() calls bootSerialMainEboardMcu() (same routine as the
+    standalone checkEboard: waits for "Ready" on /dev/ttyS5 at 115200, sends
+    0x41). Klipper restarts never involve it, which fits the eboard-outage
+    hypothesis (reset without the magic strands the board at "Ready.").
+    Bootloader serial settings decoded too: 115200 8N1 (IAPCommand uses even
+    parity). See software/boards/eboard/bootloader.txt. Still untested:
+    the outage hypothesis itself.
+[x] LIVE FLASH READBACK DONE (2026-09-18, read-only, both boards; files in
+    firmware-recon/live-flash-dumps/, write-up in software/boards/
+    flash-layout.txt): (1) the chips run the STOCK firmware - mainboard
+    flash == stock AD5X.bin, eboard app == stock 1.1.1 ADM_App.hex, both
+    byte-identical; (2) both boards read-protection L0, no write
+    protection; (3) eboard DBG_ID live = 0x8F544511 = N32G455/256 KiB;
+    (4) the eboard's 64 KiB region holds a ~9 KiB custom serial bootloader
+    (not CanBoot; prints "Ready.") - never seen before; (5) backups of
+    the first 40 KiB of each board's app are saved. Not read: the rest of
+    each flash, the ROM bootloader (System Memory), RAM.
+[~] (Earlier step, kept for history) Step 1 of the flash-readback plan DONE: mainboard option bytes read
+    (a5 5a ff ff ...): read protection L0 (unprotected), no write
+    protection - see software/boards/flash-layout.txt. Eboard option
+    bytes and both boards' flash contents still unread.
 [ ] Read-only backup of the MCUs' running flash images (both boards)
     via the same dump_mcu.py debug_read path (e.g. 0x08000000 onward,
     512 KiB mainboard / 256 KiB eboard by the DBG_ID decode). The
@@ -209,6 +241,21 @@ Real factory packages (user-provided, see software/factory-packages/)
     explains the mainboard outage. What is still not proven: that 49/50
     really are NRST/BOOT0 (schematic needed) and nothing was observed
     live. See software/boards/boot-entry-and-gpio.txt.
+[~] Flash layout of both MCUs - ANSWERED offline (software/boards/
+    flash-layout.txt): mainboard app at 0x08000000, ~37 KB, no bootloader
+    in flash; eboard app at 0x08010000 above a 64 KiB region that no file
+    or tool output has ever shown. The eboard bootloader's identity is
+    OPEN, and the earlier "genuine CanBoot" claim was overstated (those
+    strings are in the APPLICATION). Reading that region (flash-readback
+    item above, addresses 0x08000000-0x0800FFFF on the eboard) would
+    settle it.
+[~] Stock firmwareExe checked for an eboard start handshake and MCU
+    GPIOs (boot-entry-and-gpio.txt section 7): no handshake strings; its
+    only GPIO output is GPIO 44 (power-off). No stock copy of the
+    xblax-style handshake found. Lead not closed.
+[x] Remaining third-party repos (Stone-Time, g992 klipper.zip,
+    mstraciak) read - nothing about this printer's MCUs
+    (software/boards/prior-art.txt, Source 8).
 [~] CORRECTION to earlier notes: IAPCommand (eboard) never calls its GPIO
     functions (GPIO 34/35 code is unreachable), so the "reset GPIO left
     asserted" explanation does NOT cover the eboard outage. Why the eboard
@@ -217,6 +264,15 @@ Real factory packages (user-provided, see software/factory-packages/)
     (xblax's scripts, older AD5M). Open lead: whether this printer's stock
     software does an eboard start handshake like xblax's boot_eboard_mcu
     (no stock script found; would be inside a binary).
+
+DECISION RECORDED 2026-09-18 (user): work toward the HOST OS IMAGE layer first; the printer stays
+READ-ONLY (no writes to the printer or MCUs). Groundwork done so far: software/boot/
+rootfs-and-boot-chain.txt (rootfs unpacked and validated, full boot chain, vendor modules, hazards).
+[ ] Host-OS groundwork still open (offline): decode the kernel image further (it has no readable
+    config/banner - check for compression or an embedded initramfs), identify which parts of the
+    Ingenic X2600 SDK a rebuild would need, inventory /usr/prog (Qt 4.8.6, tslib, libs) as the
+    app-side dependency set, and trace where pthread_create starts the Klipper thread.
+[x] PB07 = Wi-Fi module power pin (8821cu power_on=PB07) - resolves the earlier "purpose unknown".
 
 Decisions not yet made (need direction, not just more recon)
 --------------------------------------------------------------------

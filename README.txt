@@ -6,6 +6,8 @@ needs asking) before running anything against the live printer.
 
 start here
 ------------
+SUMMARY.txt - ONE-PAGE current state of knowledge (start here; supersedes older notes
+              where they disagree)
 other.txt   - project goal, printer access/SSH details, repo context,
               ground rules (READ THIS FIRST if you're new to this project)
 plan.txt    - open items / next steps, what's resolved vs. still unknown
@@ -27,14 +29,29 @@ software/boot/  - the Linux host system: SoC, OS, rooting, A/B update
                        that reuses the same A/B slots
   bootloader-spl.txt - the first-stage bootloader search - genuinely
                        blocked, needs physical hardware access
+  rootfs-and-boot-chain.txt - the unpacked rootfs, the complete boot chain
+                       (init -> app_startup.sh -> firmwareExe -> Klipper), vendor
+                       kernel modules with pins, hazards, what a replacement
+                       host OS must provide (extracted/rootfs holds the files)
 
 software/boards/  - the 4 known MCU sub-boards, one folder each
   main/chip.txt   - mainboard MCU: Nations N32G455 (512 KiB flash, decoded
                     from DBGMCU_IDCODE), NationsCommand tool, the real
                     outage + safe recovery pattern found
-  eboard/chip.txt - toolhead MCU: real klipper3d/canboot bootloader,
+  eboard/chip.txt - toolhead MCU: N32G455 with 256 KiB flash (read live),
+                    app at 0x08010000 above a small custom serial
+                    bootloader (NOT CanBoot - see its corrections),
                     IAPCommand tool, the second outage; chip ID via the
-                    safe dump_mcu.py method (N32G455, 256 KiB inferred)
+                    safe dump_mcu.py method
+  eboard/bootloader.txt - the eboard's ~9 KiB custom serial bootloader,
+                    fully disassembled: XMODEM-CRC-style protocol, 'C' erases
+                    160 KiB of app, 'A' (0x41) starts the app after every
+                    cold boot, the 0x1234 magic, stock checkEboard tool
+  flash-layout.txt - where each MCU's firmware sits in flash (mainboard app
+                    at 0x08000000, no flash bootloader; eboard app at
+                    0x08010000 above a ~9 KiB custom bootloader), option
+                    bytes (read protection L0), and the LIVE READBACK
+                    showing both boards run the STOCK firmware
   boot-entry-and-gpio.txt - how the MCUs enter/leave bootloader mode:
                     NationsCommand's two host GPIOs (49 reset pulse, 50
                     BOOT0) decoded by disassembly, the Nations manual's
@@ -84,6 +101,13 @@ extracted/  - the actual extracted/decrypted files themselves (not
                     snapshot, extracted
   main-update/    - the decrypted OS update package + its sub-packages,
                     extracted
+  rootfs/         - the unpacked rootfs squashfs (470 files; symlinks in
+                    _manifest.txt), identical to what the printer runs
+
+firmware-recon/live-flash-dumps/ - flash/option-byte/ID contents READ FROM THE
+                    RUNNING MCUs (read-only): eboard 64 KiB bootloader
+                    region, both apps, option bytes, DBG_ID. Its README.txt
+                    has the md5s. Shows the chips run the STOCK firmware.
 
 firmware-recon/  - MCU firmware binaries pulled directly off the live
                     printer early in the project (Mainboard.bin,

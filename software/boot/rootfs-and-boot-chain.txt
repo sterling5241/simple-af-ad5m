@@ -1,0 +1,129 @@
+AD5M - ROOTFS CONTENTS, FULL BOOT CHAIN, AND WHAT A REPLACEMENT HOST OS MUST PROVIDE
+=======================================================================================
+(See README.txt for the index; partitions/containers in ab-slots.txt, update mechanism in
+ota-system.txt, hardware in hardware.txt.) Written 2026-09-18 from the update package's rootfs
+image, unpacked OFFLINE, plus read-only reads of the running kernel. Nothing was written to the
+printer. Direction chosen by the user for this stretch of work: HOST OS IMAGE, staying READ-ONLY.
+
+1. WHAT WAS UNPACKED, AND HOW IT WAS CHECKED
+--------------------------------------------
+- Image: extracted/main-update/kernel-extracted/ota_kernel/ota_v1/rootfs.squashfs.0000.<md5>
+  (13,107,200 bytes, SquashFS v4, LZO, 128 KiB blocks). Its md5 (1d0a22a7d596dcbe343a0c920f551d30)
+  equals the md5 of the first 13,107,200 bytes of BOTH live root partitions (mmcblk0p2 and p4), so
+  the package's rootfs IS the rootfs the printer runs. [solid]
+- Unpacked to extracted/rootfs/ (470 regular files; symlinks, device nodes etc. are listed in
+  extracted/rootfs/_manifest.txt, not created, because Windows). No native LZO was available, so
+  firmware-recon/analysis/lzo.py is a small pure-Python LZO1X decoder used by
+  firmware-recon/analysis/unpack_rootfs.py (needs `pip install PySquashfsImage`).
+- Validation: 21 files chosen at random or by size (including 2.3 MB libraries) were md5-summed on the
+  live printer (read-only) and locally: 21 of 21 match. [solid]
+
+2. THE FULL BOOT CHAIN (in order)
+---------------------------------
+ 0. Power-on: first-stage bootloader (location/format UNKNOWN - see bootloader-spl.txt) picks
+    kernel/kernel2 from the "ota" pointer partition and loads the uImage (load/entry 0x80f00000).
+ 1. Kernel: Linux 5.10.186+ (build #126, 2024-10-28, "Ingenic MIPS Linux Tools GCC12.1 ... xburst2
+    glibc2.33 ... MXA"), SMP PREEMPT, MIPS32r5 with MSA. Command line:
+      console=ttyS0,115200n8 loglevel=8 mem=236M@0x0 rmem=16M@0xec00000 rtos_size=4M@0xfc00000
+      mem=256M@0x30000000 init=/linuxrc root=/dev/mmcblk0p4 rootwait rootfstype=squashfs ro
+      lpj=11476992
+    (~492 MB RAM in two banks, 16 MB "rmem" and a 4 MB "rtos" region reserved; a serial console on
+    ttyS0 at 115200.) No /proc/config.gz; the package kernel image has no readable config or banner.
+ 2. /linuxrc = busybox init; /etc/inittab: mount tmpfs on /dev, proc, `mount -a` (fstab: proc, devpts,
+    tmpfs /dev/shm /tmp /run, sysfs), swapon, set hostname, then /etc/init.d/rcS; a getty on the
+    console; shutdown runs rcK.
+ 3. rcS runs every /etc/init.d/S?? in order:
+      S08mdev              mdev -df (device nodes)
+      S09mount_mmc_prog    mount_mmc_ext4.sh usershare /usr/prog/   (partition found BY NAME, p6)
+      S10jpeg_display      waits for /dev/fb0, shows /usr/prog/logo.jpeg (else /etc/logo.jpeg),
+                           loads utils + gpio_backlight, turns the backlight on
+      S11module_driver_default  runs /module_driver/driver_default_init_script.sh (loads the vendor
+                           modules, section 4)
+      S20urandom, S21mount_mmc_ext4 (userdata -> /usr/data, p7), S21mount_ubifs (unused here),
+      S30dbus, S40network (ifup -a; only lo is configured), S41dhcpcd, S50dropbear (SSH),
+      S90adb (USB gadget adb), S99factory_test_shell
+ 4. S99factory_test_shell "start": IF /usr/prog/app_startup.sh exists, run it; ELSE fall back to
+    `ifconfig eth0 up; ifconfig eth0 10.33.31.60`. (The factory hardware tests in that script are
+    commented out.) THIS ONE LINE is the only hook from the read-only rootfs into the application.
+ 5. /usr/prog/app_startup.sh (stock 1.1.1 copy in extracted/main-update/software-extracted/):
+      - waits 2 s, sets pin PC15 to output 0;
+      - scans /dev/sda* for a USB stick and mounts it; if an AD5X-*.tgz is found it copies it to
+        /usr/data, unpacks it with /usr/prog/mytar (the DES3 decrypt), and runs its
+        flashforge_init.sh; or runs /mnt/flashforge_init.sh directly - this is the unauthenticated
+        USB update path (see rooting.txt);
+      - `mount /usr/prog/etc /etc`: the live /etc is a copy on the app partition (created from the
+        rootfs's /etc on first boot), so EDITS TO /etc PERSIST and the read-only squashfs /etc is
+        shadowed;
+      - if a PROGRAM/control/<latest>/Update or UpdateM flag file exists: run that dir's run.sh
+        (this is what flashes the MCUs) and `reboot -f`;
+      - loads tsc2007_touch.ko (resistive touch, I2C0 addr 0x48, IRQ PC07, 800x480) and
+        /usr/prog/modules/8821cu.ko power_on=PB07 (Realtek RTL8821CU USB Wi-Fi; PB07 is its power
+        pin - this explains the `cmd_gpio ... PB07` calls in firmwareExe);
+      - exports the Qt 4.8.6 QWS/tslib environment (framebuffer /dev/fb0, transformed 480x800) and
+        library paths for openssl 1.0.2d, curl, ffmpeg, x264, libffi, opencv 4.2.0, libzip, nim;
+      - sets the eth0 MAC from /usr/prog/MAC;
+      - starts /usr/prog/sys_start.sh & (the PC11 toggle loop) and /usr/prog/PROGRAM/software/
+        firmwareExe -1 -D -qws & ; if firmwareExe is not running after 10 s it copies the newest
+        versioned firmwareExe into place and starts it again.
+ 6. firmwareExe (stock GUI): initFont -> the eboard 'A' start handshake (see ../boards/eboard/
+    bootloader.txt) -> constructs MainWindow -> a worker thread runs /usr/prog/klipper/start.sh &.
+    (Zmod's layer sits on top of this; that is separate from what is documented here.)
+
+3. LOADED KERNEL MODULES ON THE LIVE PRINTER (lsmod, read-only)
+---------------------------------------------------------------
+From /module_driver (vendor, all vermagic "5.10.186+ SMP preempt mod_unload MIPS32_R5 32BIT",
+GPL, most depend on utils.ko): utils, rmem_manager, soc_gpio, soc_i2c, soc_pwm, soc_fb,
+soc_fb_layer_mixer, lcd_kx070, soc_aic, soc_icodec, x2600_510_icodec_sound_card, soc_adc,
+soc_dtrng, gpio_regulator, gpio_backlight, keyboard_gpio_add, soc_mac_driver, soc_watchdog,
+tsc2007_touch (loaded by app_startup.sh). Also present in /module_driver but NOT loaded on this
+printer: gt9xx_touch (capacitive alternative), soc_mcu. From elsewhere (not in the rootfs image):
+8821cu (2.9 MB, USB Wi-Fi), and usbserial + pl2303, cp210x, ch341, usb_serial_simple.
+Parameters that pin down the board (from the module scripts):
+   display      soc_fb + lcd_kx070, 800x480 panel; backlight = gpio_backlight on PC14 (active high)
+   touch        tsc2007: I2C0 addr 0x48, IRQ PC07, 800x480, y flipped (gt9xx alternative: reset PC08)
+   I2C0         soc_i2c: 400 kHz, SCL PC00, SDA PC01 (I2C1-3 disabled)
+   power key    keyboard_gpio_add: PB11, KEY_POWER2 (0x164), active low
+   regulator    gpio_regulator: PC11 = "GPIO-POWER0", active-low (init state unset)
+   Ethernet     soc_mac_driver (stmmac at 0x134b0000), no PHY power/reset GPIOs
+   watchdog     soc_watchdog loaded with wdt0/wdt1 DISABLED (/dev/watchdog nodes exist)
+   mcu          soc_mcu.ko exists with enable_jtag_debug=1 (not loaded here); the "rtos" reserved
+                memory suggests a second core/RTOS on the X2600 - not investigated
+   UARTs        /proc/iomem shows six: ttyS0 (console), ttyS2 (mainboard MCU), ttyS3 (used by
+                firmwareExe, purpose not traced), ttyS4 (IFS), ttyS5 (eboard), ttyS7 (load cell)
+   eMMC         7.1 GiB, GPT p1-p7 (ab-slots.txt) plus hardware boot0/boot1/rpmb partitions
+NOTE on PC11: it is BOTH the gpio_regulator's "GPIO-POWER0" pin AND the pin sys_start.sh toggles
+every second. What that pin physically drives (a supervisor/external watchdog input, a regulator
+enable, or something else) is UNKNOWN.
+
+4. WHAT A REPLACEMENT HOST OS WOULD HAVE TO PROVIDE (facts, not a recommendation)
+--------------------------------------------------------------------------------
+- A kernel that the vendor modules load into: 5.10.186+ SMP PREEMPT MIPS32r5 (vermagic must match,
+  or the modules must be rebuilt from the Ingenic X2600 SDK sources, which are not on the printer).
+  There is no kernel config available here; the running one has no /proc/config.gz.
+- The hardware bring-up above (I2C0, backlight PC14, panel, touch, power key PB11, MAC, Wi-Fi power
+  PB07 + 8821cu, PC15 = output 0 at start, PC11 heartbeat).
+- The eboard start handshake (send 0x41 after the eboard prints "Ready.") before anything expects
+  the eboard - otherwise Klipper cannot reach it after a cold boot.
+- Something that starts Klipper (the stock GUI does; Zmod does it differently).
+- Serial devices /dev/ttyS2 (mainboard), ttyS5 (eboard), ttyS4 (IFS), ttyS7 (load cell).
+- The two data partitions by NAME ("usershare", "userdata"): the stock mount script finds them by
+  parsing `fdisk -l`, and see hazard 1 below.
+- Nothing in the rootfs is signed, and the A/B pointer lets a bad image be undone by flipping the
+  "ota" pointer back - but only while the bootloader and the OTHER slot are intact.
+
+5. HAZARDS SEEN IN THE STOCK SCRIPTS
+------------------------------------
+1. mount_mmc_ext4.sh: if `mount -t ext4` fails it runs `mkfs.ext4 <partition>` and mounts the fresh
+   filesystem - i.e. a transient mount failure on usershare or userdata REFORMATS it (all app data,
+   Klipper config, gcodes). (fsck -y runs first.)
+2. If /usr/prog/app_startup.sh is absent the printer boots with eth0 at 10.33.31.60 and no GUI.
+3. app_startup.sh runs any flashforge_init.sh from a USB stick with no authentication and then
+   `sleep 100000` on success; a Control-package Update/UpdateM flag causes MCU flashing and
+   `reboot -f` at every boot until the flag is removed.
+4. The stock root password is a SHA-256 crypt hash (not tested or recovered here).
+
+6. OPEN QUESTIONS
+-----------------
+- Where the first-stage bootloader and the "rtos" side live (needs physical access).
+- What PC11 and PC15 drive; what ttyS3 is used for; whether soc_mcu/rtos is used at all.
+- Whether the Ingenic X2600 SDK (kernel + module sources) is obtainable for rebuilding modules.

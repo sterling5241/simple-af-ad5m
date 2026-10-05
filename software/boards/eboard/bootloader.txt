@@ -1,0 +1,154 @@
+AD5M - EBOARD BOOTLOADER (0x08000000-0x0800248B), reverse-engineered from the live dump
+=========================================================================================
+(See README.txt for the full index; chip facts in chip.txt, layout in ../flash-layout.txt.)
+Source: firmware-recon/live-flash-dumps/eb_boot.bin, read from the running eboard on
+2026-09-18 (read-only). Full annotated Thumb disassembly: firmware-recon/analysis/
+eb_boot.dis.txt (regenerate with analysis/thumb_dis.py). NOTHING here was run or sent
+to the board - this is static analysis of the bytes plus the host-side tools that talk to it.
+Confidence: the flow below is read directly from the disassembly. Things I did not
+determine are listed at the end. It is a small custom program - NOT CanBoot/Katapult.
+
+WHAT IT IS
+----------
+A ~9.1 KiB serial (USART1) bootloader for the eboard's N32G455. It sits at 0x08000000 (vector
+table: initial SP 0x20002908, reset 0x080001AD -> C runtime init -> main at 0x20BA) and
+manages the application at 0x08010000. It speaks an XMODEM/YMODEM-CRC-like protocol:
+- ACK = 0x06, NAK = 0x15 (its send routine at 0x22D0 is called with r0 = 6 / 0x15).
+- Data frames are 1030 bytes: first byte 0x01, then a 4-byte header total, 1024 data bytes
+  and a 2-byte CRC. The CRC (routine at 0x1698) is CRC-16 with polynomial 0x1021, init 0
+  (the XMODEM CRC), computed over the 1024 data bytes at buffer+4 and compared with the
+  little-endian halfword at buffer+0x404. (Receive buffer 0x20001000.)
+- Single-byte commands, decided in the receive handler at 0x1200-0x1280 by the first byte
+  of a 1-byte packet:
+      0x43 'C'  -> state 1   ("connect / begin update")
+      0x04 EOT  -> state 3   ("end of transmission")
+      0x41 'A'  -> state 5   ("start the application")
+  and a 0x406-byte packet starting 0x01 sets the "data frame received" flag (handled in
+  state 2). The state byte lives at RAM 0x200002D0; the dispatcher (tbb at 0x210C) has 7
+  states (handlers at 0x2118, 0x212C, 0x2160, 0x21FC, 0x2210, 0x226C, 0x2286).
+
+WHAT IT DOES, STATE BY STATE
+----------------------------
+Boot (main, 0x20BA): state = 0; init clocks/peripherals; read backup register 4 (BKP block
+0x40006C00). If it equals the magic 0x1234: clear it, run a 2,000,000-iteration busy-wait
+(literal 0x001E8480), then jump to the application at 0x08010000. If NOT: stay in the
+bootloader (so on a normal cold power-up it does NOT start the app by itself).
+State 0 (idle, 0x2118): a loop counter; every ~2.86 million passes (literal 0x002BB14C) it
+    prints "Ready.\r\n" over USART1 (string at 0x22A0) and waits.
+State 1 ('C', 0x212C): sends ACK (0x06), UNLOCKS FLASH (keys 0x45670123 / 0xCDEF89AB, at
+    0xBE4), clears flash status flags, then ERASES 0x50 = 80 pages at a 0x800-byte stride
+    starting at 0x08010000 (page-erase routine at 0xAD0: sets PER, writes the page address,
+    sets STRT, waits) - i.e. 160 KiB, 0x08010000-0x08037FFF - and moves to state 2.
+State 2 (data, 0x2160): for each 0x406-byte frame, checks the CRC; on success programs the
+    1024 data bytes as 32-bit words (program-word routine at 0xB88: checks 4-byte alignment,
+    sets PG, writes the word, waits) then ACKs (0x06); on CRC mismatch NAKs (0x15).
+State 3 (EOT, 0x21FC): ACKs and moves to state 4.
+State 4 (0x2210): ACKs, LOCKS flash (0xB74), waits the 2M-iteration delay, then requests a
+    system reset (SCB AIRCR SYSRESETREQ). It does NOT set the 0x1234 magic, so after this
+    reset the bootloader is idle again, printing "Ready." until it is told to start.
+State 5 ('A', 0x226C): ACKs, waits the delay loop, then calls the start-application
+    routine (0x2070) with 0x08010000. That routine only jumps if the word at 0x08010000
+    (the app's initial stack pointer) satisfies (word & 0x2FFE0000) == 0x20020000; it then
+    loads MSP from it and jumps to the reset vector at 0x08010004. So an erased or
+    garbage app region is NOT started.
+
+HOW THE APPLICATION HANDS BACK TO THE BOOTLOADER (and back)
+-----------------------------------------------------------
+The STOCK eboard application (byte-identical to the 1.1.1 ADM_App.hex) contains a routine
+at 0x08016858 that writes 0x1234 into backup register 4 and then triggers SCB AIRCR
+SYSRESETREQ (0x05FA0004). So an application-initiated restart sets the magic; the
+bootloader then clears it and chains straight back into the app after its delay - no host
+involvement. (The same code, with the same 0x1234 write, is in the stock MAINBOARD
+application at 0x08006BCE; the mainboard has no bootloader in flash, so there it just
+restarts the app. That is a shared code base, not a second bootloader.) I did not trace
+which Klipper command calls this routine; it is very likely the "reset" command
+(the string "reset" is in the app's command table), but that is not verified.
+
+THE HOST SIDE (three independent pieces of evidence that agree)
+--------------------------------------------------------------
+1. IAPCommand (this printer's flash tool, firmware-recon/IAPCommand): stm32Sync sends the
+   single byte 0x43 ('C') (retrying) and expects 0x06 (or 0x07) back, else prints "Can not
+   connect to board, timed-out."; stm32Write then sends 1030-byte (0x406) frames and waits
+   for an ACK after each ("The %dth frame data transmission is completed."), and finally one
+   more byte (EOT) and an ACK. fillPacket builds packetNum / packetSize / crc16 / address /
+   lastValid fields per block. It opens the port at 8 data bits, EVEN parity, 1 stop.
+2. checkEboard (a stock FlashForge tool shipped in /usr/prog/klipper/, MIPS, 9 KB, in the
+   stock 1.0.9 and 1.1.1 trees): main() calls bootSerialMainEboardMcu(), which opens
+   /dev/ttyS5, reads up to 20 times for the text "Ready", then writes the byte 0x41 ('A')
+   and waits for an ACK 0x06 (up to 20 tries), printing "Serial: serial ACK send/recv".
+   This is exactly the host half of the 'A' start command.
+3. xblax's boot_eboard_mcu (older AD5M mod; references/xblax-klipper-mod/): waits for "Ready.",
+   writes 0x41, checks for 0x06, prints "Application is starting.".
+   His mcu_update.sh also sends the app the request string " \x1c Request Serial Bootloader!! ~"
+   first (so the RUNNING app reboots to the bootloader) and then runs IAPCommand.
+
+CONSEQUENCES / WHAT THIS EXPLAINS
+---------------------------------
+- After every cold power-up the eboard idles in this bootloader printing "Ready." until the
+  host sends 'A' (0x41). THE SENDER IS THE STOCK GUI ITSELF: firmwareExe (started at boot by
+  /usr/prog/sys_start.sh; running as PID 1080 on the live printer) has the function
+  bootSerialMainEboardMcu() in its symbol table and its main() calls it directly (call at
+  0x4FEAB4). It is the same routine as the standalone checkEboard tool: open /dev/ttyS5 at
+  B115200 (termios constant 0x1002), read up to 20 times for "Ready", send the ACK/start byte
+  (0x41 in checkEboard's disassembly), read the reply, log "Serial: serial ready/ACK ...".
+  (My earlier statement that firmwareExe had no handshake was wrong: I searched for strings
+  and only the first 12 hits per pattern; the handshake is a function, found via its symbol.)
+  Zmod's own boot_eboard_mcu calls are commented out, so stock firmwareExe is what does it here.
+  Consequences: after a COLD power-up, sys_start.sh -> firmwareExe -> handshake -> app runs ->
+  Klipper connects. A Klipper-only restart never touches firmwareExe, so it can never resend 'A'.
+  firmwareExe ALSO has bootSerialMainMcu() (same shape, /dev/ttyS2, a 4-byte ACK) but nothing
+  calls it directly - apparently dead code on this hardware (the mainboard has no such
+  bootloader in flash).
+- HAZARD (read straight from state 1): a bare 0x43 sent to an eboard that is sitting in its
+  bootloader makes it ERASE 160 KiB of application flash (0x08010000-0x08037FFF) right after
+  the ACK. The bootloader itself (0x08000000-0x0800248B) is outside that range and survives,
+  and the stock app can be re-flashed with IAPCommand from the stock ADM_App.hex we hold. This
+  is why IAPCommand's sync byte must never be sent to a board in that state unless a re-flash
+  is intended. (While the app is running, 'C' is just an unknown byte to it.)
+- Hypothesis for the unexplained EBOARD OUTAGE (UNTESTED): if the eboard got reset WITHOUT the
+  magic in backup register 4 (for example a watchdog or fault reset after the zero-argument
+  IAPCommand run wrote 8E1 sync bytes into the app's serial line), it would come back in this
+  bootloader and print "Ready." instead of running Klipper. Klipper restarts cannot revive
+  that (they never send 'A'), but a power cycle would, if the boot-time sender then runs.
+  That matches every recorded symptom of that incident (eboard lost, klippy restarts useless,
+  only a power cycle fixed it) - and it now has a concrete mechanism for why a power cycle
+  helps: it restarts firmwareExe, which resends 'A'. A candidate recovery WITHOUT a power cycle
+  would be running checkEboard (or restarting firmwareExe) - but only against a board known to
+  be sitting at "Ready."; UNTESTED, and not something to try on a healthy running board.
+  Nothing has been done to test the hypothesis.
+
+SERIAL SETTINGS AND FRAME HEADER (decoded afterwards)
+------------------------------------------------------
+- The bootloader configures USART1 (routine at ~0x15A4) with a standard init struct: BaudRate =
+  115200 (mov.w #0x1C200 at 0x15B2), word length 8, 1 stop bit, parity none (all three fields 0),
+  mode RX+TX (0x0C), no flow control; DMA (channel at 0x40020058) plus the USART idle-line
+  interrupt feed the receive buffer. So: 115200 8N1 by my reading of the struct (I assumed the
+  Nations SDK constants match ST's; not verified).
+- Host tools: checkEboard and firmwareExe open ttyS5 at B115200 (agrees). IAPCommand's default
+  baud is also 115200 (literal 0x1C200 in main), but its serialOpen is called with parity 'E'
+  (0x45), which sets PARENB and clears PARODD = EVEN parity. So IAPCommand talks 8E1 to a
+  bootloader configured 8N1. That mismatch evidently works in practice (the tool is the
+  shipped update path); my guess - untested - is that DMA reception tolerates the framing
+  errors. Earlier notes calling this "the STM32 ISP framing/protocol" were wrong: the protocol
+  is the XMODEM-CRC-like one above; only the even parity resembles STM32 ISP's 8E1.
+- Frame header: only the first byte (0x01) is examined, in the receive handler (0x126E-0x127C,
+  which also requires length 0x406) and the data path (0x2160-0x21F0) uses just the CRC and the
+  1024 data bytes. Bytes 1-3 are not read by that code, and the write address is implicit: the
+  bootloader starts at 0x08010000 and advances 0x400 per frame (register r5 at 0x21E0). So
+  IAPCommand's per-block packetNum/packetSize/address fields are carried but not used by this
+  bootloader as far as I read.
+
+NOT DETERMINED (remaining)
+--------------------------
+- Whether the Nations SDK parity/word-length constants match ST's (affects "8N1" above).
+- Whether anything other than firmwareExe's start-up call resends 'A' (for example after an
+  eboard reset while firmwareExe is already running).
+- Boot ORDER, partly checked: firmwareExe's main() runs initFont, then the eboard handshake
+  (call at 0x4FEAB4), then constructs MainWindow (0x4FEAD0). Klipper is started by a worker
+  thread, pthreadCheckKlipperStart (0x5366A8), which runs `/usr/prog/klipper/start.sh &`; that
+  thread is not created directly in main, so I did not trace where pthread_create happens
+  (probably inside MainWindow). So the handshake comes before Klipper's launch by construction
+  order, but the thread start itself is not traced.
+- Which command in the app triggers the magic-writing reset routine.
+- The ASCII fragments near the end of the bootloader's data ("M132 X Y Z A B", "G1 Z15 F400",
+  "M117", "X-41 Y-40 F30"): purpose unexplained.

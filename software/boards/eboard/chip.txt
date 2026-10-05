@@ -3,7 +3,31 @@ AD5M - EBOARD MCU (toolhead board)
 (See README.txt for the full index. See ../main/chip.txt for the
 mainboard MCU, ../ifs/chip.txt for the 4th, unidentified subsystem.)
 
-Identity: runs the genuine klipper3d/canboot bootloader
+CORRECTION (2026-09-18, later - read this first): the "genuine CanBoot
+bootloader" claim in this section is OVERSTATED. The " CanBoot!" and
+"Request Serial Bootloader" strings live inside the eboard APPLICATION
+image (app at 0x08010000) and are the app's side of the request handshake
+(Klipper's armcm_reset.c / serial_irq.c). Nothing seen so far shows what
+bootloader occupies the first 64 KiB of flash or that it is CanBoot; see
+../flash-layout.txt ("CORRECTION about CanBoot"). What IS established is
+that the app supports being told to reboot into a bootloader, and that a
+64 KiB region below the app exists.
+
+UPDATE (later the same day, after reading the eboard's flash - details in
+../flash-layout.txt, "LIVE FLASH READBACK"): the region below the app is a
+small (~9 KiB) custom serial bootloader with no CanBoot/Katapult text; it
+contains flash-unlock code, USART1 references, the string "Ready.\r\n" and
+the app-base literal 0x08010000. And the eboard APP on the chip is
+byte-identical to the STOCK 1.1.1 ADM_App.hex (md5
+8523f0e7e2b93c9c9982b2cb3cdbbc4d), NOT the Zmod-bundled Eboard.hex
+discussed below - so the "Zmod ships its own build of the eboard firmware"
+paragraph is true of the file on the printer only, not of what the board
+runs. The bootloader has since been fully reverse-engineered - see
+bootloader.txt (protocol, states, the 'A'=0x41 start handshake, the stock
+checkEboard tool, and a flash-erase hazard on a stray 'C'). Live DBG_ID = 0x8F544511 (N32G455, 256 KiB flash, 144 KiB SRAM),
+option bytes a5 5a ff ... (read protection L0).
+
+Identity: runs the genuine klipper3d/canboot bootloader (OVERSTATED - see above)
 ------------------------------------------------------------
 Flashed via a tool called "IAPCommand" with a hex firmware file (Intel
 HEX format - "ADM_App.hex" is the real, original filename; Zmod

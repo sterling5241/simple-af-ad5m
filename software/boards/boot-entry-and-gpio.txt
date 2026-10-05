@@ -69,12 +69,19 @@ Everything below is from the disassembly (addresses are in the ELF).
 - disconnected_N32G45X @0x406858: gpio_out(0x32, 0), then a stub call.
 - Nothing in NationsCommand ever calls gpio_unexport, so both GPIOs stay
   exported (at their last value) until the host reboots.
-- main() call order by address: connected_to (0x401410); [erase
-  0x401448/0x40150c, download 0x401564, chip_app_go 0x4015b0,
-  disconnected 0x4015c0]; [check_download_file 0x4015f8, disconnected
-  0x40161c]; serial_port_scan 0x40162c; erase_all 0x401644; chip_system_
-  reset 0x40165c. I could not fully order chip_system_reset (the -r path)
-  against disconnected because they sit on different option branches.
+- main() order, read from the branch structure at 0x401590-0x4015d0
+  (checked in a second pass): connected_to (0x401410) -> [erase 0x401448/
+  0x40150c, download 0x401564, check_download_file 0x4015f8 when -d] ->
+  IF the -r flag (stack byte 0x358) is set: chip_system_reset (0x40165c) ->
+  IF the -j flag (0x359) is set: chip_app_go (0x4015b0) ->
+  disconnected_N32G45X (0x4015c0, drives GPIO 50 LOW) -> setUpdateFlag
+  (0x401a94; it just runs `rm -f <dir>/Update...`, no GPIO) -> exit.
+  chip_system_reset sends BOOT command 0x50 ("Reset chip ..."); chip_app_go
+  sends 0x51 ("Jump chip ..."). The Nations BOOT guide describes 0x50 as
+  "reset the BOOT program to run again" and 0x51 as "jump to the user
+  area" (prior-art.txt Source 5).
+  NOTE the order: the in-band reset (-r) is sent BEFORE GPIO 50 is
+  lowered. See section 3 for what that implies.
 My reading (code + manual, never observed live): GPIO 49 is the mainboard
 MCU's NRST and GPIO 50 is its BOOT0 - i.e. connect = "raise BOOT0, pulse
 reset, so the chip re-latches BOOT0 and starts the ROM bootloader".
@@ -89,16 +96,27 @@ but nothing resets the chip afterward, so it stays in the ROM bootloader.
 Klipper cannot talk to the ROM bootloader ("Unable to connect"), a Klipper
 "restart" cannot reset a chip that isn't running Klipper's firmware, and
 only a power cycle (which re-latches BOOT0, now low) returns it to main
-flash. `-c -r` works because -r issues the chip reset after the tool is
-done (chip_system_reset / the BOOT reset command). This fits every
-observation recorded so far, but I never read GPIO 49/50 or the chip state
-during the incident, so it is inference, not measurement.
+flash. Why `-c -r` works is LESS clear than I first wrote: the -r reset
+(BOOT command 0x50) goes out BEFORE the tool lowers GPIO 50, so the chip
+resets while GPIO 50 is still high. If GPIO 50 really is BOOT0 that reset
+would send the chip back into the ROM bootloader - yet the recorded -c -r
+run left Klipper running normally. Two ways to reconcile: (a) the ROM only
+performs the reset a little after acknowledging 0x50, by which time the
+tool has already dropped GPIO 50 (a timing race that happens to work), or
+(b) GPIO 50 is not BOOT0 (or not the only thing that matters) and my role
+assignment is wrong. Static analysis cannot tell these apart. What is
+solid is the observed pattern (bare -c strands the chip until a power
+cycle; -c -r has been fine once, and xblax's mod runs it at every boot)
+and the code fact that -c alone has no reset step at all. Everything else
+here is inference: I never read GPIO 49/50 or the chip state during the
+incident.
 
 4. IAPCommand (eboard, /dev/ttyS5) - the GPIO code is present but unreachable
 ------------------------------------------------------------------------------
 - main flow (from the disassembly and its strings): parseOptions (default
   port literal "/dev/ttyS5") -> stm32Init(port, baud) -> serialOpen with 8
-  data bits and parity 'E' (0x45) = 8E1, the STM32 ISP framing -> stm32Sync;
+  data bits and parity 'E' (0x45) = 8E1 (even parity; NOT the STM32-ISP protocol - the bootloader it talks to is
+  XMODEM-CRC-like, see eboard/bootloader.txt) -> stm32Sync;
   on failure "Can not connect to board, timed-out." then main prints
   "IAPCommand: Can not connect to board."; on success readHexFile ->
   fillPacket -> stm32Write -> stm32Close -> a `touch /root/N32...` command
@@ -168,3 +186,82 @@ That is a lead for the unexplained eboard outage, not an explanation.
   (schematic needed). The NRST/BOOT0 roles are inferred, not proven.
 - Why the eboard needed a power cycle after the zero-arg IAPCommand run.
 - Whether the stock system performs an eboard start handshake (section 5).
+
+7. Stock firmwareExe checked for the eboard start handshake / MCU GPIOs
+-----------------------------------------------------------------------
+(2026-09-18, offline; extracted/main-update/software-extracted/firmwareExe
+= the 1.1.1 GUI app, 14.1 MB MIPS ELF, NOT stripped; the 1.0.9 copies in
+extracted/factory-full are byte-identical to each other and differ from
+1.1.1.) Looking for the older-AD5M eboard start handshake (section 5) and
+for any host GPIO that resets or boots an MCU:
+- String search: "Request Serial Bootloader", "Ready.", "Application is
+  starting", "NRST", "BOOT0", "stm32isp": NONE present. NationsCommand and
+  IAPCommand are not referenced at all; the only flash tool named is
+  IFSCommand ("IFSCommand /usr/prog/PROGRAM/control/ifs.hex /dev/ttyS4").
+  So firmwareExe does not flash the mainboard/eboard itself (the run.sh
+  scripts do, see ../factory-packages/main-update.txt). It opens
+  /dev/ttyS2, ttyS3, ttyS4, ttyS5 and ttyS7.
+- No text or binary file under the stock usr/prog and usr/data trees
+  contains "Application is starting" or "Waiting for MCU to become ready".
+  So no stock copy of the xblax-style eboard start handshake was found;
+  if this printer does one, it is not spelled out anywhere searchable.
+- firmwareExe has named GPIO wrappers (gpio_export/out/read/write/...,
+  sysfs-based, same shape as the flash tools'). Direct call sites (found
+  after a decoder that restarts on undecodable words): gpio_out from
+  MainWindow::doPowerOff and Print::printCompletedPowerOff, both with
+  argument 0x2c = GPIO 44 (in printCompletedPowerOff the value written is
+  0), and gpio_export + gpio_get_value from sLightCheck(unsigned) - a
+  reading of a GPIO whose number is passed in by the caller. So the
+  stock GUI's only GPIO OUTPUT is GPIO 44, evidently the power-off line;
+  none of GPIO 34/35/49/50 appears as a constant at those call sites.
+  (Calls through registers would not be seen; the same limits apply as in
+  section 4.) The 1.1.1 build additionally contains shell strings
+  "cmd_gpio set_func PB07 output0" / "... output1" (an SoC pin, PB07;
+  purpose unknown); the 1.0.9 build does not.
+- Conclusion: the stock GUI does not toggle the MCU reset/boot GPIOs, and
+  no eboard start handshake was found in it. The lead about the eboard
+  outage is therefore still open, not confirmed or excluded.
+
+8. The eboard's own bootloader says "Ready." (live flash readback, 2026-09-18)
+-------------------------------------------------------------------------
+Reading the eboard's first 64 KiB (flash-layout.txt, LIVE FLASH READBACK)
+showed a small custom serial bootloader at 0x08000000 that contains the
+string "Ready.\r\n", USART1 and flash-unlock code, and a literal pointing at
+the application (0x08010000). "Ready." is the exact token xblax's
+boot_eboard_mcu waits for (section 5), so the older-AD5M handshake
+("Waiting for MCU to become ready ... Ready. ... Application is
+starting.") is very probably the same bootloader behaviour on this printer.
+This moves the earlier open lead forward but does not close it:
+- Still unknown: whether the bootloader waits for a host reply or times out
+  into the application after its delay loop (only the start of it was
+  disassembled), and what the host sends.
+- Still unfound: the host-side sender on THIS printer - section 7 found no
+  "Ready." or "Application is starting" in the stock firmwareExe or any
+  stock script, so it may be a timeout, or done by something not searched.
+- Relevant to the unexplained eboard outage: the zero-argument IAPCommand
+  run wrote STM32-ISP sync bytes at 8E1 into the serial line of an eboard
+  that was running its APPLICATION (Klipper firmware); this bootloader,
+  not the application, is what IAPCommand's protocol is meant for.
+  Whether stray bytes on the line could drive the board to reboot into this
+  bootloader and sit at "Ready." is a hypothesis that fits the pieces but
+  is UNTESTED.
+- UPDATE (same day, full disassembly of that bootloader - see
+  eboard/bootloader.txt): the bootloader does NOT time out into the app on a
+  cold boot; it prints "Ready." until it receives 0x41 ('A'), and the stock
+  package ships the host half of that handshake as /usr/prog/klipper/
+  checkEboard (waits for "Ready", sends 0x41, expects ACK 0x06) - but nothing
+  found on this printer launches it, and Zmod's own boot_eboard_mcu calls are
+  commented out. An app-initiated reset sets a magic value (0x1234 in backup
+  register 4) so the bootloader chains straight back into the app. The
+  outage hypothesis above is therefore sharper: a reset WITHOUT the magic
+  strands the eboard at "Ready." (untested).
+
+9. CORRECTION to section 7 and 8 (later the same day)
+------------------------------------------------------
+Section 7 said no eboard start handshake was found in the stock firmwareExe. That was wrong:
+the search was by string, and the handshake is a FUNCTION. firmwareExe's symbol table has
+bootSerialMainEboardMcu() (0x506C08) and bootSerialMainMcu() (0x506834), and firmwareExe's
+main() calls the eboard one directly (call at 0x4FEAB4): it opens /dev/ttyS5 at B115200, waits
+for "Ready" and sends the start byte 0x41 - the same routine as the standalone
+/usr/prog/klipper/checkEboard. The mainboard variant has no direct caller. Details and the
+consequence for the eboard outage hypothesis: eboard/bootloader.txt.

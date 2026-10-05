@@ -13,6 +13,15 @@ ways:
   2. mainline Klipper's own bundled source tree already includes
      lib/n32g45x
 
+CORRECTION (2026-09-18, after reading the chip's flash): the MCU actually
+RUNS THE STOCK IMAGE. The first 37,504 bytes at 0x08000000 read back from
+the live mainboard are byte-identical to the stock AD5X.bin (md5
+522b4641821016952cd4504e4c2177ed) - see ../flash-layout.txt and
+firmware-recon/live-flash-dumps/. The Zmod-bundled Mainboard.bin
+described below exists as a file on the printer but is not what is
+flashed, so "Zmod's real footprint includes recompiled MCU firmware" (end
+of this paragraph) is true of the files only, not of the running board.
+
 Zmod ships its OWN BUILD of this firmware, not a stock copy - checked
 directly: the genuine stock factory AD5X.bin (extracted/main-update/
 control-extracted/, from the real decrypted 1.1.1 control package, and

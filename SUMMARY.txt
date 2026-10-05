@@ -1,0 +1,100 @@
+AD5M PROJECT - CURRENT STATE OF KNOWLEDGE (consolidated 2026-09-18)
+===================================================================
+One page you can read instead of the layered notes. Confidence: [solid] = read from bytes/
+hardware or a primary source; [inferred] = code + docs but never observed live; [open] = unknown.
+Detail lives in the files named in brackets. README.txt is the full index; plan.txt lists what
+is still open. Where an older note contradicts this page, THIS page (and the newest CORRECTION
+blocks in those notes) is right. The printer is currently healthy (Klipper "ready").
+
+THE PRINTER
+-----------
+- FlashForge AD5M by name, internally AD5X (MACHINE=AD5X, PID 0026). Host: Ingenic X2600 (MIPS),
+  Buildroot, kernel 5.10.186, eMMC; root filesystem is squashfs, read-only. [solid]
+  [software/boot/hardware.txt]
+- A/B kernel+rootfs slots with an "ota" pointer partition; on-device OTA toolkit writes the
+  inactive slot then flips the pointer; NO signing check. USB-autorun update injection is
+  unauthenticated (root shell via factory SSH). Update packages are DES3-encrypted with a key
+  hardcoded on the device (decrypted locally). [solid] [software/boot/*, software/factory-packages/*]
+- First-stage bootloader/SPL location: not visible from Linux; needs physical access. [open]
+- Boot chain fully mapped: bootloader(?) -> kernel -> squashfs rootfs -> init -> vendor modules ->
+  S99 -> /usr/prog/app_startup.sh -> firmwareExe -> eboard handshake -> Klipper. The rootfs is
+  unpacked in extracted/rootfs (identical to the live one). [solid] [software/boot/rootfs-and-boot-chain.txt]
+- Stock boot script /usr/prog/sys_start.sh toggles SoC pin PC11 every second forever; PC11 is also
+  the gpio_regulator's "GPIO-POWER0" pin. What it drives is unverified. PB07 = Wi-Fi power pin. The stock GUI firmwareExe launches Klipper via a
+  worker thread running /usr/prog/klipper/start.sh. [solid facts, purpose open]
+- The printer runs Zmod; that only matters for file locations. Zmod's bundled MCU firmware files are
+  NOT what the MCUs run (below).
+
+THE MCUs (all read read-only; nothing has ever been written to an MCU)
+----------------------------------------------------------------------
+MAINBOARD  /dev/ttyS2, 230400 baud
+- Nations N32G455, 512 KiB flash, 144 KiB SRAM (DBG_ID 0x8F584511 read live; decode confirmed
+  against the Nations user manual). [solid] [software/boards/main/chip.txt, flash-layout.txt]
+- Runs the STOCK firmware: flash from 0x08000000 is byte-identical to stock AD5X.bin (md5
+  522b4641821016952cd4504e4c2177ed). App starts at the very start of flash; NO bootloader in
+  flash. Read protection L0 (option bytes a5 5a ff..), no write protection. [solid]
+- Only bootloader = the chip's ROM bootloader in System Memory. Vendor tool NationsCommand talks to
+  it: it drives host GPIO 50 high and pulses GPIO 49 low ~200 ms (by my reading BOOT0 and NRST).
+  Bare `-c` strands the chip in that ROM bootloader until a power cycle; `-c -r` has worked.
+  [GPIO roles inferred; the -r timing is unexplained] [software/boards/boot-entry-and-gpio.txt]
+EBOARD  /dev/ttyS5, 230400 baud (app); 115200 (bootloader)
+- Nations N32G455, 256 KiB flash (DBG_ID 0x8F544511 read live), L0, no write protection. [solid]
+- Runs the STOCK app (byte-identical to stock 1.1.1 ADM_App.hex, md5 8523f0e7e2b93c9c9982b2cb3cdbbc4d)
+  at 0x08010000, above a ~9 KiB CUSTOM serial bootloader at 0x08000000 (NOT CanBoot) that was
+  never in any package - backed up as firmware-recon/live-flash-dumps/eb_boot.bin. [solid]
+- Bootloader protocol (fully disassembled): XMODEM-CRC-like, 1030-byte frames, CRC-16/0x1021.
+  'C' (0x43) = begin update AND immediately erases 160 KiB of app; 'A' (0x41) = start the app;
+  EOT (0x04) = finish, lock, reset. After a COLD boot it idles printing "Ready." until it gets
+  'A'; after an app-initiated reset (app writes magic 0x1234 to backup register 4) it chains back
+  into the app itself. [solid] [software/boards/eboard/bootloader.txt]
+- The stock GUI (firmwareExe main()) sends the 'A' at start-up (same routine as the standalone
+  /usr/prog/klipper/checkEboard). Klipper restarts never resend it. [solid]
+- HAZARD: never send 'C' (IAPCommand's sync byte) to an eboard sitting in the bootloader unless a
+  re-flash is intended: it erases the app. A re-flash needs the stock ADM_App.hex (held locally).
+IFS (filament feed board)  /dev/ttyS4
+- A 4-channel filament feed/switch system with its own firmware (ifs.hex) and flash tool
+  IFSCommand (same design as IAPCommand). Not instantiated in this printer's config; never
+  queried live. Whether IFS hardware is attached is unknown. [software/boards/ifs/chip.txt]
+Also: /dev/ttyS7 = load-cell telemetry; the Z probe is a plain digital pin. [software/klipper/load-cell.txt]
+
+WHAT IS SAFE / UNSAFE ON THE LIVE PRINTER
+-----------------------------------------
+- Safe (done repeatedly): read-only SSH; Klipper's stock scripts/dump_mcu.py debug_read over the
+  normal protocol (stop Klipper, read, restore). Restore recipe: export LD_LIBRARY_PATH for
+  Python-3.8.2/openssl-1.0.2d/libffi-3.4.4 then `nohup /usr/prog/klipper/start.sh &`, then poll
+  Moonraker /printer/info for "ready" (~1 min). Not `klipperDaemon start`. [software/klipper/moonraker.txt]
+- Unsafe / caused real outages: NationsCommand -c without -r (mainboard, needed a physical power
+  cycle); a zero-argument IAPCommand run (eboard, needed a physical power cycle; cause of that one
+  is still unexplained - see hypothesis below). Treat both vendor tools as state-changing.
+
+WHAT THE OLD NOTES GOT WRONG (all corrected in place, listed here so you don't trip on them)
+- "The eboard runs the genuine CanBoot bootloader" - wrong: those strings are in the app; the
+  bootloader is a small custom one.
+- "Zmod ships/flashes its own MCU firmware" - only the FILES exist; the chips run stock images.
+- "Both outages share one cause: a reset GPIO left asserted" - wrong for the eboard:
+  IAPCommand's GPIO code is never called. For the mainboard the better explanation is that
+  bare -c leaves the chip in its ROM bootloader.
+- "IAPCommand speaks the STM32 ISP protocol at 8E1" - wrong: it speaks the XMODEM-like protocol
+  (with even parity on the port).
+- "firmwareExe has no eboard handshake" - wrong: it is a function (bootSerialMainEboardMcu), found
+  via the symbol table.
+
+OPEN QUESTIONS
+--------------
+- Eboard outage: leading hypothesis (UNTESTED) is that the board was reset without the 0x1234 magic
+  and sat at "Ready.", which Klipper restarts cannot fix but a power cycle (which restarts the GUI
+  and its 'A' handshake) can.
+- Whether GPIO 49/50 really are NRST/BOOT0 (needs a schematic); the host's first-stage bootloader;
+  what eboard:PB7 connects to (all need physical access).
+- Whether IFS hardware is present; what the PC11 heartbeat feeds.
+- DIRECTION CHOSEN (2026-09-18): host OS image first, printer stays read-only. Hazard to know: the
+  stock mount script REFORMATS usershare/userdata (mkfs.ext4) if a mount fails.
+- Of the three decisions in plan.txt, two are now made (target layer = host OS image; access =
+  read-only). Still yours: reconciling the stated goal with the ground rules in other.txt.
+
+BACKUPS / KEY FILES
+-------------------
+- firmware-recon/live-flash-dumps/ : what was read from the running MCUs (md5s in its README).
+- extracted/main-update/control-extracted/ : stock AD5X.bin and ADM_App.hex (restore images).
+- references/ : Nations user manual and BOOT guide (private copies), xblax/g992 material.
+- firmware-recon/analysis/ : the disassembly scripts and eb_boot.dis.txt.

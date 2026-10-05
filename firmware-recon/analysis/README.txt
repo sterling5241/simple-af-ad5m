@@ -5,5 +5,9 @@ Run from firmware-recon/:   python analysis/<script>.py <ELF> [args]
   dump_func.py   <ELF> <name-substr>.. full disassembly of matching functions, string operands annotated
   callers.py     <ELF> <name-substr>.. who calls the named functions (jal/j only - function-pointer calls are NOT seen)
   calls.py       <ELF> <func>          call list + string literals + small immediates for one function (e.g. main)
-Results and interpretation: software/boards/boot-entry-and-gpio.txt
+  thumb_dis.py   <bin> <base_hex> [end_off_hex]   annotated Thumb disassembly of a small Cortex-M image
+                 (literal-pool values, peripheral names); eb_boot.dis.txt is its output for
+                 live-flash-dumps/eb_boot.bin (base 0x08000000, end 0x2490)
+Results and interpretation: software/boards/boot-entry-and-gpio.txt,
+software/boards/eboard/bootloader.txt
 Limits: static analysis only; nothing was run. Indirect calls (function pointers, PLT) are not followed.

@@ -1,0 +1,194 @@
+AD5M - MCU FLASH LAYOUT (mainboard and eboard firmware images)
+================================================================
+(See README.txt for the full index. Written 2026-09-18. The top sections come
+from OFFLINE analysis of firmware images held locally; the sections at the
+end (OPTION BYTES result, LIVE FLASH READBACK) come from read-only reads of
+the running MCUs. Where an early section was later contradicted by the
+readback it says so. Chip facts: main/chip.txt, eboard/chip.txt.
+Script: parsing Intel-HEX extended-address records and reading the first
+32 bytes / scanning for vector tables in each image.)
+
+Images examined
+---------------
+  Zmod-bundled firmware-recon/Mainboard.bin  37,792 bytes (a file from the printer's
+              Zmod directory; the live readback shows it is NOT what the chip runs)
+  STOCK 1.1.1 extracted/main-update/control-extracted/AD5X.bin   37,504 bytes
+  Zmod-bundled firmware-recon/Eboard.hex     (Intel HEX; 37,983 data bytes; likewise not what runs)
+  STOCK 1.1.1 extracted/main-update/control-extracted/ADM_App.hex (36,004 data bytes)
+(The stock 1.0.6 AD5X.bin is identical to 1.1.1's, see ../boards/main/chip.txt.)
+
+MAINBOARD (N32G455, 512 KiB flash) - application at the very start of flash
+-----------------------------------------------------------------------------
+- Both images begin with a valid Cortex-M vector table at file offset 0:
+    live : initial SP 0x20020000, reset handler 0x080052ED
+    stock: initial SP 0x20020000, reset handler 0x08006DDD
+  (reset handlers point into 0x0800xxxx, so the load base is 0x08000000.)
+- NationsCommand's default download address is 0x08000000 and the real
+  run.sh passes no --a override, so the image is written to the START of
+  flash. The application owns 0x08000000: there is NO separate bootloader
+  region in flash on this board. The only bootloader is the chip's ROM
+  bootloader in System Memory (see boot-entry-and-gpio.txt).
+- Size: about 37 KB out of 512 KB (~7%). Image end 0x080093A0 (live) /
+  0x08009280 (stock), assuming a 0x08000000 base.
+- SP 0x20020000 means the firmware was built with 128 KiB of RAM
+  (RAM_SIZE 0x20000); the chip has 144 KiB SRAM per DBG_ID. Klipper's
+  own Kconfig defaults for N32G45x (this printer's bundled source, and
+  g992's issue #8) are 128 KiB flash / 64 KiB RAM / 128 MHz, whereas the
+  live MCU handshake reports 144 MHz - so these images were NOT built with
+  the upstream N32G45x defaults.
+- The stock AD5X.bin contains Klipper's bootloader-request string
+  (" \x1c Request Serial Bootloader!! ~", at offset 0x91FB); the Zmod-
+  bundled Mainboard.bin does not (the chip itself runs the stock image). What the stock firmware would jump to on that
+  request is unknown (nothing lives at 0x08000000 except the app itself).
+
+EBOARD (N32G455 with 256 KiB flash, inferred) - application at 0x08010000
+------------------------------------------------------------------------------
+- Both hex files load at 0x08010000 (extended-linear-address record 0x0801).
+    live : 0x08010000-0x0801942A (37,931 B) + a 52-byte block at
+           0x0801942C-0x0801945F; initial SP 0x20020000; reset 0x080152E5
+    stock: 0x08010000-0x08010187 and 0x08010190-0x08018CAB (36,004 B total);
+           initial SP 0x20020000; reset 0x08016A7D
+- So the first 64 KiB (0x08000000-0x0800FFFF) is NOT part of either file.
+  Something other than the application must live there, because after
+  reset the CPU fetches its vectors from 0x08000000. That region's contents
+  have never been seen - neither the hex files nor any tool output include
+  it. Klipper's Kconfig has a "64KiB bootloader" option
+  (STM32_FLASH_START_10000, offering it for STM32F103/F4) that matches this
+  offset, which is consistent with, but not proof of, a Klipper-style
+  build.
+- Both hex files' data ends near 0x08019460 (live) / 0x08018CAC (stock),
+  i.e. about 100 KiB into a 256 KiB device.
+
+CORRECTION about "CanBoot" (was overclaimed in ../boards/eboard/chip.txt)
+---------------------------------------------------------------------------
+The strings "CanBoot" and "Request Serial Bootloader" that were earlier
+taken as proof that the eboard runs the genuine CanBoot BOOTLOADER are
+inside the APPLICATION image, not in a bootloader:
+   live Eboard.hex      "CanBoot" at 0x08011610, request string at 0x08017B93
+   stock ADM_App.hex    request string at 0x08018C4B (no "CanBoot")
+This printer's bundled Klipper source explains them: src/generic/
+armcm_reset.c implements try_request_canboot()/canboot_reset(), which the
+application uses to leave a request signature and reset so that a
+CanBoot-compatible bootloader can take over, and src/generic/serial_irq.c
+triggers it when the request string arrives. Those are the APPLICATION's
+side of the handshake. What they show: the eboard application supports
+being asked to reboot into a bootloader. What they do NOT show: which
+bootloader sits at 0x08000000, or that it is the open-source CanBoot.
+Note also that IAPCommand speaks an STM32-ISP-style protocol (8E1 serial,
+sync bytes - see boot-entry-and-gpio.txt), and, as far as I know, CanBoot's
+own serial flashing uses a different protocol (its own flashtool); I did
+not verify that. The bootloader's identity is therefore OPEN until its 64
+KiB region is read (the flash-readback test in plan.txt would show it).
+
+What this means / does not mean
+-------------------------------
+- Known: where each application starts (mainboard 0x08000000, eboard
+  0x08010000), how big they are, and that the eboard reserves 64 KiB below
+  its app.
+- (Written before the live readback; see the LIVE FLASH READBACK section
+  at the end: the bootloader's contents, the write-protection state and the
+  option bytes are now known, and its protocol has since been decoded -
+  see eboard/bootloader.txt.)
+
+OPTION BYTES - what a read of 0x1FFFF800 would show (from the manual)
+----------------------------------------------------------------------
+(Nations user manual, section 3, Table 3-3 / 3-4, extracted text - the table
+is garbled, so the placement below is my reading.) The option-byte block is
+at 0x1FFF_F800-0x1FFF_F811. Each 32-bit word holds an option byte and its
+bitwise complement (an integrity check; erased = both 0xFF):
+    0x1FFFF804: [31:24]=? USER(bits 23:16)   [7:0]=RDP1
+    0x1FFFF808: nUSER   Data1    nRDP1(bits 15:8)   Data0
+    0x1FFFF80C: nData1  WRP1     nData0             WRP0
+    0x1FFFF810: nWRP1   WRP3     nWRP0              WRP2
+    (+ RDP2 / nRDP2 further along)
+Read protection (Table 3-4):
+    L0 (unprotected):  RDP1 == 0xA5 and nRDP1 == 0x5A (and not the L2 pattern)
+    L2 (irreversible): RDP2 == 0xCC and nRDP2 == 0x33 (whatever RDP1 is)
+    L1: anything else
+At L1 "only the read operation of the main storage area from the USER CODE
+is allowed" (JTAG/SWD access is blocked), i.e. firmware running on the chip
+- like Klipper's debug_read - can still read main flash even at L1. L2 is
+the same plus SRAM boot, debug and option-byte writes disabled.
+So a 20-byte dump_mcu.py read at 0x1FFFF800 shows the read-protection state.
+
+RESULT (2026-09-18, mainboard /dev/ttyS2, user-approved, Klipper stopped
+then restored; command: dump_mcu.py -b 230400 -s 0x1FFFF800 -l 0x14):
+    1FFFF800: a5 5a ff ff ff ff ff ff  ff ff ff ff ff ff ff ff
+    1FFFF810: ff ff ff ff
+- The first two bytes are RDP = 0xA5 and nRDP = 0x5A: exactly the manual's
+  "unprotected" pattern, and no byte reads as the L2 pattern (RDP2 0xCC /
+  nRDP2 0x33), so the MAINBOARD IS AT READ-PROTECTION LEVEL L0: main flash
+  is freely readable and writable, including by SWD/JTAG, and the manual's
+  L1/L2 restrictions do not apply.
+- Every other byte (USER, Data0/1, WRP0-3 and their complements) is 0xFF,
+  the erased state - no page write protection is set (assuming an
+  STM32-style layout where WRP bits set = unprotected).
+- CORRECTION to my own placement above: the manual's Table 3-3 puts RDP1 in
+  the word at 0x1FFFF804, but the live data has RDP/nRDP in the FIRST two
+  bytes (0x1FFFF800/801), like an STM32F1. The extracted table is garbled;
+  trust the live bytes for the mainboard, not my transcription of it.
+- The eboard's option bytes have NOT been read.
+
+LIVE FLASH READBACK (2026-09-18, both boards, read-only) - RESULTS
+===================================================================
+Files and md5s: firmware-recon/live-flash-dumps/README.txt. Read with
+dump_mcu.py while Klipper was stopped (restored afterwards; Moonraker back
+to "ready"). Nothing was written to either MCU.
+
+1. THE CHIPS RUN THE STOCK FIRMWARE, not the Zmod-bundled builds
+   - Mainboard: the first 37,504 bytes at 0x08000000 are byte-identical to
+     the stock AD5X.bin (md5 522b4641821016952cd4504e4c2177ed - the same
+     file in stock 1.0.6 and 1.1.1).
+   - Eboard: 0x08010000 onward is byte-identical to the 1.1.1 stock
+     ADM_App.hex data (36,012 bytes, md5 8523f0e7e2b93c9c9982b2cb3cdbbc4d).
+   - Both differ from the files in the printer's Zmod directory
+     (Mainboard.bin / Eboard.hex, firmware-recon/): the first differing
+     byte is offset 4 - the reset vector - in both. So on this printer the
+     Zmod-bundled MCU builds are present as files but are NOT flashed. My
+     earlier notes (main/chip.txt, eboard/chip.txt, plan.txt) said "Zmod
+     ships its own MCU firmware ... real footprint includes recompiled MCU
+     firmware on both boards"; that is only true of the FILES, not of what
+     the boards run. Each of those notes now carries a correction.
+   - This also means the live handshake strings recorded earlier (Klipper
+     build tags 2024-11-22 / 2024-11-25, gcc 9.2.1) describe the STOCK
+     builds.
+2. Read protection: both boards are L0 (option bytes a5 5a ff ff ...,
+   identical on both), with no page write protection set (assuming the
+   STM32-style layout described above). Flash is freely readable, and
+   per the manual writable.
+3. Eboard DBG_ID read live: 0x8F544511 -> N32G455, 256 KiB flash, 144 KiB
+   SRAM. This turns the earlier "inferred" eboard flash size into a
+   measurement (it matched the prediction from the UID-block tail word).
+4. EBOARD 64 KiB BOOTLOADER REGION (0x08000000-0x0800FFFF), never seen before:
+   - Only about 9.1 KiB is used: non-0xFF data from 0x0000 to 0x248B (three
+     4 KiB blocks); 0x2490-0xFFFF is all 0xFF (erased). Vector table:
+     initial SP 0x20002908, reset handler 0x080001AD - a small, separate
+     program with its own tiny RAM footprint, not the application.
+   - It is NOT CanBoot/Katapult as far as strings can tell: no "CanBoot",
+     "Katapult" or "Bootloader" text anywhere in it, and at 9 KiB it is a
+     small program. (This settles the flash-layout.txt CanBoot question
+     in the negative for the region's contents; it does not say who wrote it.)
+   - What it does contain (from literals and strings): the flash-controller
+     unlock keys 0x45670123 / 0xCDEF89AB, the flash controller base
+     0x40022000, USART1 (0x40013800) references, the reset register
+     (SCB AIRCR 0xE000ED0C), the literal 0x08010000 (the application base),
+     the string "Ready.\r\n" at 0x22A0, and an early busy-wait loop counting
+     to 2,000,000 (literal 0x001E8480). So it is a serial (USART1)
+     flash-programming bootloader that announces "Ready." and hands off to
+     the application at 0x08010000.
+   - "Ready." is exactly the token that xblax's boot_eboard_mcu waits for
+     on the older AD5M ("Eboard MCU sent 'Ready.'", boot-entry-and-gpio.txt
+     section 5), so that handshake is very likely the same bootloader
+     behaviour on this hardware too. RESOLVED afterwards by
+     full disassembly (eboard/bootloader.txt): on a cold power-up it does
+     NOT time out into the app - it idles printing "Ready." until the host
+     sends 0x41 ('A'); after an app-initiated reset (magic 0x1234 in backup
+     register 4) it chains back into the app by itself. It speaks an
+     XMODEM-CRC-like protocol with 1030-byte frames. It also contains a few ASCII fragments near
+     the end of its data ("M132 X Y Z A B", "G1 Z15 F400", "M117",
+     "X-41 Y-40 F30") whose purpose is unexplained.
+   - This is the code that IAPCommand talks to when it flashes the eboard
+     (STM32-ISP-style serial protocol; see boot-entry-and-gpio.txt), which
+     fits a custom bootloader rather than CanBoot.
+5. Coverage: only 40 KiB of each app area was read; the rest of each
+   flash, System Memory (the ROM bootloader) and RAM were not.
